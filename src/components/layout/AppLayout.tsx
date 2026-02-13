@@ -94,7 +94,7 @@ export function AppLayout() {
   useKeyboardShortcuts();
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-full w-full overflow-hidden">
       <AppSidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar with global search + mini stats */}

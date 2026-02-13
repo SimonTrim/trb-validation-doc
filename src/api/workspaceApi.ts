@@ -9,9 +9,16 @@ import { getRegionCode } from '@/models/trimble';
 
 declare const TrimbleConnectWorkspace: any;
 
-const EXTENSION_BASE_URL = import.meta.env.VITE_BACKEND_URL
-  ? new URL(import.meta.env.VITE_BACKEND_URL as string).origin
-  : 'https://trb-validation-doc.vercel.app';
+/** Base URL de l'extension — déduit du VITE_BACKEND_URL ou fallback */
+const EXTENSION_BASE_URL = (() => {
+  try {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL as string;
+    if (backendUrl && backendUrl.startsWith('http')) {
+      return new URL(backendUrl).origin;
+    }
+  } catch { /* ignore parse error */ }
+  return 'https://trb-validation-doc.vercel.app';
+})();
 
 let workspaceApi: any = null;
 
@@ -22,6 +29,17 @@ export function isInTrimbleConnect(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Helper: timeout wrapper pour éviter de bloquer l'app */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`[WorkspaceAPI] Timeout: ${label} (${ms}ms)`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 /** Initialise la connexion au Workspace API */
@@ -45,10 +63,11 @@ export async function initWorkspaceApi(): Promise<boolean> {
       return false;
     }
 
-    workspaceApi = await wsAPI.connect(
-      window.parent,
-      handleEvent,
-      30000
+    // Connect with a hard 15s timeout (SDK has its own 30s timeout, we short-circuit earlier)
+    workspaceApi = await withTimeout(
+      wsAPI.connect(window.parent, handleEvent, 30000),
+      15000,
+      'connect',
     );
 
     // Get project info

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Component, type ErrorInfo, type ReactNode } from 'react';
 import { Toaster, toast } from 'sonner';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuthStore } from '@/stores/authStore';
@@ -12,6 +12,70 @@ import { DOCUMENT_VALIDATION_STATUSES } from '@/models/workflow';
 import type { ValidationDocument } from '@/models/document';
 import { DEFAULT_LABELS } from '@/models/document';
 import type { WorkflowDefinition, WorkflowInstance } from '@/models/workflow';
+
+// ============================================================================
+// ERROR BOUNDARY — Capture les erreurs de rendu React
+// Empêche un écran blanc en affichant un message d'erreur clair
+// ============================================================================
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[AppErrorBoundary] Render error caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          height: '100%', width: '100%', padding: '24px',
+          fontFamily: "'Open Sans', sans-serif", backgroundColor: '#fff',
+        }}>
+          <div style={{ textAlign: 'center', maxWidth: '480px' }}>
+            <div style={{
+              width: '48px', height: '48px', margin: '0 auto 16px',
+              borderRadius: '50%', backgroundColor: '#fee2e2',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '20px', color: '#dc2626',
+            }}>!</div>
+            <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px', color: '#111' }}>
+              Erreur de rendu
+            </h2>
+            <p style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>
+              {this.state.error?.message || 'Une erreur inattendue est survenue.'}
+            </p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); }}
+              style={{
+                padding: '8px 24px', fontSize: '14px', fontWeight: 500,
+                backgroundColor: '#004388', color: '#fff', border: 'none',
+                borderRadius: '6px', cursor: 'pointer',
+              }}
+            >
+              Réessayer
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 /** Mode applicatif : 'production' quand dans TC, 'demo' sinon (ou forcé par env) */
 const APP_MODE = (import.meta.env.VITE_APP_MODE as string) || 'demo';
@@ -418,14 +482,23 @@ export function App() {
     };
   }, []);
 
-  // Loading state
+  // Loading state — uses inline styles as fallback in case CSS doesn't load in iframe
   if (!initialized || isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Chargement de l'extension...</p>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100%', width: '100%', minHeight: '200px',
+        fontFamily: "'Open Sans', sans-serif",
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '32px', height: '32px', margin: '0 auto 16px',
+            border: '4px solid #004388', borderTopColor: 'transparent',
+            borderRadius: '50%', animation: 'spin 1s linear infinite',
+          }} />
+          <p style={{ fontSize: '14px', color: '#666' }}>Chargement de l'extension...</p>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -434,17 +507,30 @@ export function App() {
   if (error && !initialized) {
     const showLogin = !isInTrimbleConnect() && APP_MODE === 'production';
     return (
-      <div className="flex h-screen items-center justify-center p-6">
-        <div className="max-w-md text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-            <span className="text-xl">!</span>
-          </div>
-          <h2 className="mb-2 text-lg font-semibold">Erreur de connexion</h2>
-          <p className="mb-4 text-sm text-muted-foreground">{error}</p>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100%', width: '100%', padding: '24px',
+        fontFamily: "'Open Sans', sans-serif",
+      }}>
+        <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+          <div style={{
+            width: '48px', height: '48px', margin: '0 auto 16px',
+            borderRadius: '50%', backgroundColor: '#fee2e2',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '20px', color: '#dc2626',
+          }}>!</div>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>
+            Erreur de connexion
+          </h2>
+          <p style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>{error}</p>
           {showLogin && (
             <button
               onClick={() => startOAuthFlow()}
-              className="rounded-md bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              style={{
+                padding: '8px 24px', fontSize: '14px', fontWeight: 500,
+                backgroundColor: '#004388', color: '#fff', border: 'none',
+                borderRadius: '6px', cursor: 'pointer',
+              }}
             >
               Se connecter avec Trimble Identity
             </button>
@@ -455,7 +541,7 @@ export function App() {
   }
 
   return (
-    <>
+    <AppErrorBoundary>
       <AppLayout />
       <Toaster
         position="bottom-right"
@@ -466,6 +552,6 @@ export function App() {
           className: 'text-sm',
         }}
       />
-    </>
+    </AppErrorBoundary>
   );
 }
