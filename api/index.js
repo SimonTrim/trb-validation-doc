@@ -16,6 +16,13 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     process.env.FRONTEND_URL,
+    'https://trb-validation-doc.vercel.app',
+    // Trimble Connect origins (the iframe host)
+    'https://web.connect.trimble.com',
+    'https://app.connect.trimble.com',
+    'https://app21.connect.trimble.com',
+    'https://app31.connect.trimble.com',
+    'https://app32.connect.trimble.com',
   ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -70,13 +77,49 @@ async function tcFetch(req, endpoint, options = {}) {
   return response.json();
 }
 
+// ─── RESPONSE MAPPERS ───────────────────────────────────────────────────────
+
+/** Map TC Search/File API response to normalized ConnectFile format */
+function mapTcFileToConnectFile(item) {
+  return {
+    id: item.id,
+    name: item.name || item.fileName || '',
+    extension: (item.name || '').split('.').pop()?.toLowerCase() || '',
+    size: item.size || item.fileSize || 0,
+    uploadedBy: item.createdBy || item.uploadedBy || item.creator || '',
+    uploadedAt: item.createdOn || item.uploadedAt || item.createdAt || '',
+    lastModified: item.modifiedOn || item.lastModified || item.modifiedAt || item.createdOn || '',
+    parentId: item.parentId || item.folderId || '',
+    versionId: item.versionId || item.latestVersionId || '',
+    path: item.path || item.parentPath || '',
+  };
+}
+
+/** Map TC User API response to normalized ConnectUser format */
+function mapTcUserToConnectUser(user) {
+  return {
+    id: user.id,
+    email: user.email || '',
+    firstName: user.firstName || user.givenName || '',
+    lastName: user.lastName || user.surname || '',
+    role: user.power || user.role || 'USER',
+    status: user.status || 'ACTIVE',
+  };
+}
+
 // ─── TRIMBLE CONNECT PROXY ROUTES ───────────────────────────────────────────
 
-// Files
+// Files (via TC Search API — normalize response)
 app.get('/api/projects/:projectId/files', requireAuth, async (req, res) => {
   try {
-    const data = await tcFetch(req, `/search?query=*&projectId=${req.params.projectId}&type=FILE`);
-    res.json(data);
+    const raw = await tcFetch(req, `/search?query=*&projectId=${req.params.projectId}&type=FILE`);
+    // TC Search returns either { items: [...] } or direct array
+    const items = Array.isArray(raw) ? raw : (raw?.items || raw?.results || []);
+    // Filter to only FILE type and map to our format
+    const files = items
+      .filter((item) => !item.type || item.type === 'FILE')
+      .map(mapTcFileToConnectFile);
+    res.json(files);
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -85,8 +128,16 @@ app.get('/api/projects/:projectId/files', requireAuth, async (req, res) => {
 // Folder contents
 app.get('/api/folders/:folderId/items', requireAuth, async (req, res) => {
   try {
-    const data = await tcFetch(req, `/folders/${req.params.folderId}/items`);
-    res.json(data);
+    const raw = await tcFetch(req, `/folders/${req.params.folderId}/items`);
+    const items = Array.isArray(raw) ? raw : (raw?.items || []);
+    // Map files, pass through folders
+    const mapped = items.map((item) => {
+      if (item.type === 'FILE' || item.size !== undefined) {
+        return mapTcFileToConnectFile(item);
+      }
+      return item; // folders pass through
+    });
+    res.json(mapped);
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -96,7 +147,7 @@ app.get('/api/folders/:folderId/items', requireAuth, async (req, res) => {
 app.get('/api/files/:fileId', requireAuth, async (req, res) => {
   try {
     const data = await tcFetch(req, `/files/${req.params.fileId}`);
-    res.json(data);
+    res.json(mapTcFileToConnectFile(data));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -112,11 +163,13 @@ app.get('/api/files/:fileId/downloadurl', requireAuth, async (req, res) => {
   }
 });
 
-// Project users
+// Project users (normalize to ConnectUser format)
 app.get('/api/projects/:projectId/users', requireAuth, async (req, res) => {
   try {
-    const data = await tcFetch(req, `/projects/${req.params.projectId}/users`);
-    res.json(data);
+    const raw = await tcFetch(req, `/projects/${req.params.projectId}/users`);
+    const users = (Array.isArray(raw) ? raw : (raw?.items || raw?.users || []))
+      .map(mapTcUserToConnectUser);
+    res.json(users);
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }

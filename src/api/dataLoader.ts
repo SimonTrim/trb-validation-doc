@@ -28,20 +28,27 @@ export function mapConnectFileToDocument(
   projectId: string,
   users: ConnectUser[],
 ): ValidationDocument {
-  const uploader = users.find((u) => u.id === file.uploadedBy || u.email === file.uploadedBy);
+  const uploaderId = file.uploadedBy || '';
+  const uploader = users.find(
+    (u) => u.id === uploaderId || u.email?.toLowerCase() === uploaderId.toLowerCase()
+  );
+
+  const fileName = file.name || 'Sans nom';
+  const now = new Date().toISOString();
+  const uploadedAt = file.uploadedAt || now;
 
   return {
     id: `doc-${file.id}`,
     fileId: file.id,
-    fileName: file.name,
-    fileExtension: getExtension(file.name),
+    fileName,
+    fileExtension: getExtension(fileName),
     fileSize: file.size || 0,
     filePath: file.path || '/',
-    uploadedBy: file.uploadedBy || 'unknown',
-    uploadedByName: uploader ? `${uploader.firstName} ${uploader.lastName}` : file.uploadedBy || 'Inconnu',
+    uploadedBy: uploaderId || 'unknown',
+    uploadedByName: uploader ? `${uploader.firstName || ''} ${uploader.lastName || ''}`.trim() : uploaderId || 'Inconnu',
     uploadedByEmail: uploader?.email || '',
-    uploadedAt: file.uploadedAt || new Date().toISOString(),
-    lastModified: file.lastModified || file.uploadedAt || new Date().toISOString(),
+    uploadedAt,
+    lastModified: file.lastModified || uploadedAt,
     versionId: file.versionId,
     versionNumber: 1,
     projectId,
@@ -49,7 +56,7 @@ export function mapConnectFileToDocument(
       id: 'pending',
       name: 'En attente',
       color: '#6a6e79',
-      changedAt: file.uploadedAt || new Date().toISOString(),
+      changedAt: uploadedAt,
       changedBy: 'Système',
     },
     reviewers: [],
@@ -58,11 +65,11 @@ export function mapConnectFileToDocument(
     versionHistory: [{
       versionNumber: 1,
       versionId: file.versionId || file.id,
-      fileName: file.name,
+      fileName,
       fileSize: file.size || 0,
-      uploadedBy: file.uploadedBy || 'unknown',
-      uploadedByName: uploader ? `${uploader.firstName} ${uploader.lastName}` : 'Inconnu',
-      uploadedAt: file.uploadedAt || new Date().toISOString(),
+      uploadedBy: uploaderId || 'unknown',
+      uploadedByName: uploader ? `${uploader.firstName || ''} ${uploader.lastName || ''}`.trim() : 'Inconnu',
+      uploadedAt,
     }],
     metadata: {},
   };
@@ -75,6 +82,7 @@ export async function loadProductionData(): Promise<{
   documents: ValidationDocument[];
   definitions: WorkflowDefinition[];
   instances: WorkflowInstance[];
+  users: ConnectUser[];
 }> {
   const { project } = useAuthStore.getState();
   if (!project) {
@@ -132,7 +140,7 @@ export async function loadProductionData(): Promise<{
     }
   }
 
-  return { documents, definitions: resolvedDefs, instances: resolvedInstances };
+  return { documents, definitions: resolvedDefs, instances: resolvedInstances, users: resolvedUsers };
 }
 
 /** Charge les fichiers d'un dossier spécifique (pour le FolderWatcher) */
@@ -147,6 +155,53 @@ export async function loadFolderFiles(folderId: string): Promise<ConnectFile[]> 
   }
 }
 
+/** Tente d'identifier l'utilisateur courant parmi les utilisateurs du projet */
+async function detectCurrentUser(users: ConnectUser[]): Promise<void> {
+  const authStore = useAuthStore.getState();
+  if (authStore.currentUser) return; // already set
+
+  // Try to get user info from the access token (JWT payload)
+  try {
+    const token = authStore.accessToken;
+    if (token) {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const email = payload.email || payload.sub || payload.unique_name || '';
+      if (email) {
+        const match = users.find(
+          (u) => u.email.toLowerCase() === email.toLowerCase()
+        );
+        if (match) {
+          authStore.setCurrentUser(match);
+          console.log('[DataLoader] Current user detected:', match.firstName, match.lastName);
+          return;
+        }
+        // User found in token but not in project users — create a basic entry
+        authStore.setCurrentUser({
+          id: payload.sub || email,
+          email,
+          firstName: payload.given_name || payload.firstName || email.split('@')[0],
+          lastName: payload.family_name || payload.lastName || '',
+          role: 'USER',
+        });
+        console.log('[DataLoader] Current user from token:', email);
+        return;
+      }
+    }
+  } catch {
+    // Token parsing failed — not blocking
+  }
+
+  // Fallback: first admin user, or first user
+  const admin = users.find((u) => u.role === 'ADMIN');
+  if (admin) {
+    authStore.setCurrentUser(admin);
+    console.log('[DataLoader] Current user fallback (admin):', admin.email);
+  } else if (users.length > 0) {
+    authStore.setCurrentUser(users[0]);
+    console.log('[DataLoader] Current user fallback (first):', users[0].email);
+  }
+}
+
 /** Initialise les stores avec les données chargées */
 export async function initializeStores(mode: 'production' | 'demo'): Promise<void> {
   const docStore = useDocumentStore.getState();
@@ -155,10 +210,13 @@ export async function initializeStores(mode: 'production' | 'demo'): Promise<voi
 
   if (mode === 'production') {
     try {
-      const { documents, definitions, instances } = await loadProductionData();
+      const { documents, definitions, instances, users } = await loadProductionData();
       docStore.setDocuments(documents);
       wfStore.setDefinitions(definitions);
       wfStore.setInstances(instances);
+
+      // Detect and set the current user
+      await detectCurrentUser(users);
 
       appStore.addNotification({
         id: generateId(),

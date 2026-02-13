@@ -77,8 +77,8 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
   }
 }
 
-/** Mode applicatif : 'production' quand dans TC, 'demo' sinon (ou forcé par env) */
-const APP_MODE = (import.meta.env.VITE_APP_MODE as string) || 'demo';
+/** Mode applicatif : auto-détecte 'production' quand dans TC ou forcé par env */
+const APP_MODE = (import.meta.env.VITE_APP_MODE as string) || 'auto';
 
 // ============================================================================
 // DEMO DATA — Pour le développement et la démonstration
@@ -424,7 +424,9 @@ export function App() {
   useEffect(() => {
     async function init() {
       const inTC = isInTrimbleConnect();
-      const mode = inTC && APP_MODE === 'production' ? 'production' : 'demo';
+      // Auto-detect: production when in TC iframe OR when explicitly set
+      // 'auto' mode → production in TC, demo outside
+      const mode = APP_MODE === 'production' || (APP_MODE === 'auto' && inTC) ? 'production' : 'demo';
 
       console.log(`[App] Initializing in ${mode} mode (inTC=${inTC}, APP_MODE=${APP_MODE})`);
 
