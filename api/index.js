@@ -429,6 +429,20 @@ async function ensureDb() {
 
 // ─── PROJECT FOLDERS ────────────────────────────────────────────────────────
 
+// Get root folder ID for a project (lightweight call)
+app.get('/api/projects/:projectId/rootfolder', requireAuth, async (req, res) => {
+  try {
+    console.log(`[RootFolder] GET /projects/${req.params.projectId}/rootfolder — region: ${req.region}`);
+    const project = await tcFetch(req, `/projects/${req.params.projectId}`);
+    const rootId = project.rootId || project.rootFolderId || project.root_id || '';
+    console.log('[RootFolder] Project keys:', Object.keys(project || {}), 'rootId:', rootId);
+    res.json({ rootId, projectName: project.name });
+  } catch (error) {
+    console.error('[RootFolder] Error:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to get root folder' });
+  }
+});
+
 // Get project root folder ID then list its contents
 app.get('/api/projects/:projectId/folders', requireAuth, async (req, res) => {
   try {
@@ -925,8 +939,11 @@ app.get('/api/health', (req, res) => {
 
 // ─── START SERVER ───────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`[Backend] Server running on port ${PORT}`);
-});
+// Only start listening in local dev — Vercel handles this in serverless mode
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[Backend] Server running on port ${PORT}`);
+  });
+}
 
 export default app;

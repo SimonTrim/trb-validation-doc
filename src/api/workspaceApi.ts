@@ -90,6 +90,11 @@ export async function initWorkspaceApi(): Promise<boolean> {
       store.setAccessToken(token);
       store.setConnected(true);
 
+      // Fetch rootId from TC REST API if not already available
+      if (!rootId && store.project?.id) {
+        fetchAndStoreRootId(token, store.project.id, store.region).catch(() => {});
+      }
+
       // Setup menu (with try/catch to not crash if menu API is not available)
       try {
         setupMenu();
@@ -144,6 +149,10 @@ function handleEvent(event: string, data: any) {
         store.setConnected(true);
         // Setup menu once connected
         try { setupMenu(); } catch { /* ignore */ }
+        // Fetch rootId if not yet available
+        if (!store.project?.rootId && store.project?.id) {
+          fetchAndStoreRootId(data, store.project.id, store.region).catch(() => {});
+        }
       }
       break;
 
@@ -161,6 +170,37 @@ function handleEvent(event: string, data: any) {
 
     default:
       console.log('[WorkspaceAPI] Event:', event, data);
+  }
+}
+
+/** Récupère le rootId du projet via l'API REST TC et le stocke dans l'auth store */
+async function fetchAndStoreRootId(token: string, projectId: string, region: string): Promise<void> {
+  try {
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '/api';
+    const url = `${BACKEND_URL}/projects/${projectId}/rootfolder`;
+    console.log('[WorkspaceAPI] Fetching rootId from backend:', url);
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Project-Region': region,
+      },
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const rootId = data.rootId || data.rootFolderId || '';
+      if (rootId) {
+        const store = useAuthStore.getState();
+        const currentProject = store.project;
+        if (currentProject) {
+          store.setProject({ ...currentProject, rootId });
+          console.log('[WorkspaceAPI] rootId fetched and stored:', rootId);
+        }
+      }
+    } else {
+      console.warn('[WorkspaceAPI] Failed to fetch rootId:', response.status);
+    }
+  } catch (err) {
+    console.warn('[WorkspaceAPI] Error fetching rootId:', err);
   }
 }
 
