@@ -1,7 +1,7 @@
 {
   "title": "Validation Documentaire",
   "url": "https://trb-validation-doc.vercel.app/index.html",
-  "icon": "https://trb-validation-doc.vercel.app/icon-48.svg",
+  "icon": "https://trb-validation-doc.vercel.app/icon_workflow_white.png",
   "description": "Gestion des workflows de validation documentaire BIM avec suivi des visas, révisions et approbations.",
   "enabled": true,
   "configCommand": "settings"

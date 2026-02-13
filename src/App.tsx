@@ -394,8 +394,8 @@ export function App() {
         loadDemoData();
       }
 
-      // Step 3: Start FolderWatcher if connected to TC
-      if (inTC && useAuthStore.getState().isConnected) {
+      // Step 3: Start FolderWatcher only in production mode with active connection
+      if (mode === 'production' && useAuthStore.getState().isConnected) {
         FolderWatcher.startForActiveWorkflows();
       }
 

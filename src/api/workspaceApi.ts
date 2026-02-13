@@ -4,16 +4,21 @@
 // ============================================================================
 
 import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
 import { getRegionCode } from '@/models/trimble';
 
 declare const TrimbleConnectWorkspace: any;
+
+const EXTENSION_BASE_URL = import.meta.env.VITE_BACKEND_URL
+  ? new URL(import.meta.env.VITE_BACKEND_URL as string).origin
+  : 'https://trb-validation-doc.vercel.app';
 
 let workspaceApi: any = null;
 
 /** Vérifie si on est dans l'iframe Trimble Connect */
 export function isInTrimbleConnect(): boolean {
   try {
-    return window.parent !== window && typeof TrimbleConnectWorkspace !== 'undefined';
+    return window.parent !== window;
   } catch {
     return false;
   }
@@ -32,7 +37,15 @@ export async function initWorkspaceApi(): Promise<boolean> {
   try {
     store.setLoading(true);
 
-    workspaceApi = await TrimbleConnectWorkspace.connect(
+    // Dynamically access TrimbleConnectWorkspace (loaded via script tag)
+    const wsAPI = (window as any).TrimbleConnectWorkspace;
+    if (!wsAPI) {
+      console.warn('[WorkspaceAPI] TrimbleConnectWorkspace not available on window');
+      store.setConnected(false);
+      return false;
+    }
+
+    workspaceApi = await wsAPI.connect(
       window.parent,
       handleEvent,
       30000
@@ -54,8 +67,12 @@ export async function initWorkspaceApi(): Promise<boolean> {
       store.setAccessToken(token);
       store.setConnected(true);
 
-      // Setup menu
-      setupMenu();
+      // Setup menu (with try/catch to not crash if menu API is not available)
+      try {
+        setupMenu();
+      } catch (menuErr) {
+        console.warn('[WorkspaceAPI] Menu setup failed (non-blocking):', menuErr);
+      }
 
       return true;
     } else if (token === 'denied') {
@@ -67,26 +84,28 @@ export async function initWorkspaceApi(): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('[WorkspaceAPI] Connection failed:', error);
-    store.setError('Impossible de se connecter au Workspace API');
+    // Don't set error — let the app fall back to demo mode gracefully
+    store.setConnected(false);
     return false;
   }
 }
 
 /** Configure le menu latéral de l'extension */
 function setupMenu() {
-  if (!workspaceApi) return;
+  if (!workspaceApi?.ui?.setMenu) return;
+
+  const iconBase = `${EXTENSION_BASE_URL}/icon_workflow_white.png`;
 
   workspaceApi.ui.setMenu({
-    title: 'Validation Documentaire',
-    icon: 'https://your-domain.com/icons/icon-48.png',
+    title: 'Validation',
+    icon: iconBase,
     command: 'dashboard',
     subMenus: [
-      { title: 'Tableau de bord', command: 'dashboard', icon: '' },
-      { title: 'Documents', command: 'documents', icon: '' },
-      { title: 'Visas', command: 'visa', icon: '' },
-      { title: 'Workflows', command: 'workflow-list', icon: '' },
-      { title: 'Historique', command: 'history', icon: '' },
-      { title: 'Paramètres', command: 'settings', icon: '' },
+      { title: 'Tableau de bord', command: 'dashboard', icon: iconBase },
+      { title: 'Documents', command: 'documents', icon: iconBase },
+      { title: 'Visas', command: 'visa', icon: iconBase },
+      { title: 'Workflows', command: 'workflow-list', icon: iconBase },
+      { title: 'Historique', command: 'history', icon: iconBase },
     ],
   });
 }
@@ -100,14 +119,14 @@ function handleEvent(event: string, data: any) {
       store.setAccessToken(data);
       if (!store.isConnected) {
         store.setConnected(true);
+        // Setup menu once connected
+        try { setupMenu(); } catch { /* ignore */ }
       }
       break;
 
     case 'extension.command':
-      // Menu navigation from Trimble Connect
-      const { useAppStore } = require('@/stores/appStore');
-      const appStore = useAppStore.getState();
-      appStore.setCurrentView(data);
+      // Menu navigation from Trimble Connect — use static import (no require())
+      useAppStore.getState().setCurrentView(data);
       break;
 
     case 'extension.userSettingsChanged':
