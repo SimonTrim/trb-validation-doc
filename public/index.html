@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Validation Documentaire - Trimble Connect Extension</title>
+  <link rel="icon" type="image/png" href="icons/icon-48.png" />
+  <!-- Workspace API SDK (obligatoire pour extensions TC) -->
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <!-- Extension API (compatibilité) -->
+  <script src="https://app.connect.trimble.com/tc/static/5.0.0/tcw-extension-api.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    // Configuration backend (remplacer par votre URL de production)
+    window.__BACKEND_URL__ = 'https://your-backend.vercel.app';
+  </script>
+  <!-- Bundle sera copié ici après build -->
+  <script type="module" src="dist/index.js"></script>
+</body>
+</html>

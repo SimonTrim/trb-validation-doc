@@ -1,0 +1,625 @@
+// ============================================================================
+// BACKEND PROXY — Vercel Serverless Function
+// Proxy entre l'extension (iframe) et les APIs Trimble Connect
+// + Persistance des workflows via Turso (SQLite)
+// ============================================================================
+
+import express from 'express';
+import cors from 'cors';
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// ─── CORS ───────────────────────────────────────────────────────────────────
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    process.env.FRONTEND_URL,
+  ].filter(Boolean),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Project-Region'],
+}));
+
+app.use(express.json());
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
+
+/** Get Trimble Connect Core API base URL from region */
+function getCoreApiUrl(region) {
+  const hosts = {
+    us: 'app.connect.trimble.com',
+    eu: 'app21.connect.trimble.com',
+    ap: 'app31.connect.trimble.com',
+    'ap-au': 'app32.connect.trimble.com',
+  };
+  const host = hosts[region] || hosts.eu;
+  return `https://${host}/tc/api/2.0`;
+}
+
+/** Auth middleware */
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+  req.accessToken = token;
+  req.region = req.headers['x-project-region'] || 'eu';
+  req.baseUrl = getCoreApiUrl(req.region);
+  next();
+}
+
+/** Proxy fetch to Trimble Connect API */
+async function tcFetch(req, endpoint, options = {}) {
+  const url = `${req.baseUrl}${endpoint}`;
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${req.accessToken}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw { status: response.status, message: text };
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+// ─── TRIMBLE CONNECT PROXY ROUTES ───────────────────────────────────────────
+
+// Files
+app.get('/api/projects/:projectId/files', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/search?query=*&projectId=${req.params.projectId}&type=FILE`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Folder contents
+app.get('/api/folders/:folderId/items', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/folders/${req.params.folderId}/items`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File details
+app.get('/api/files/:fileId', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/files/${req.params.fileId}`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File download URL
+app.get('/api/files/:fileId/downloadurl', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/files/${req.params.fileId}/downloadurl`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Project users
+app.get('/api/projects/:projectId/users', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/projects/${req.params.projectId}/users`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Todos (used for notifications)
+app.get('/api/projects/:projectId/todos', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/todos?projectId=${req.params.projectId}`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/todos', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, '/todos', { method: 'POST', body: req.body });
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File copy (used by workflow engine)
+app.post('/api/files/copy', requireAuth, async (req, res) => {
+  try {
+    const { fileId, targetFolderId } = req.body;
+    // TC API: copy file by creating a new reference in the target folder
+    const fileData = await tcFetch(req, `/files/${fileId}`);
+    const result = await tcFetch(req, `/folders/${targetFolderId}/files`, {
+      method: 'POST',
+      body: { fileId: fileData.id },
+    });
+    res.json(result || fileData);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File move (copy + remove from source — simplified)
+app.post('/api/files/move', requireAuth, async (req, res) => {
+  try {
+    const { fileId, targetFolderId } = req.body;
+    // Copy to target folder
+    const fileData = await tcFetch(req, `/files/${fileId}`);
+    const result = await tcFetch(req, `/folders/${targetFolderId}/files`, {
+      method: 'POST',
+      body: { fileId: fileData.id },
+    });
+    // Note: Trimble Connect doesn't have a direct "move" API.
+    // In production, you would remove the file from the source folder after copy.
+    res.json(result || fileData);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File versions
+app.get('/api/files/:fileId/versions', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/files/${req.params.fileId}/versions`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// File upload (multipart — simplified proxy)
+app.post('/api/projects/:projectId/files', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, '/files', {
+      method: 'POST',
+      body: req.body,
+    });
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ─── BCF TOPICS PROXY ──────────────────────────────────────────────────────
+
+/** Get BCF API base URL from region */
+function getBcfApiUrl(region) {
+  const hosts = {
+    us: 'open11.connect.trimble.com',
+    eu: 'open21.connect.trimble.com',
+    ap: 'open31.connect.trimble.com',
+    'ap-au': 'open32.connect.trimble.com',
+  };
+  const host = hosts[region] || hosts.eu;
+  return `https://${host}`;
+}
+
+/** Proxy fetch to BCF API */
+async function bcfFetch(req, endpoint, options = {}) {
+  const bcfBase = getBcfApiUrl(req.region);
+  const url = `${bcfBase}${endpoint}`;
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${req.accessToken}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw { status: response.status, message: text };
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+// List BCF topics
+app.get('/api/projects/:projectId/bcf/topics', requireAuth, async (req, res) => {
+  try {
+    // Try BCF 3.0, then 2.1
+    let data;
+    try {
+      data = await bcfFetch(req, `/bcf/3.0/projects/${req.params.projectId}/topics`);
+    } catch {
+      data = await bcfFetch(req, `/bcf/2.1/projects/${req.params.projectId}/topics`);
+    }
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Create BCF topic
+app.post('/api/projects/:projectId/bcf/topics', requireAuth, async (req, res) => {
+  try {
+    let data;
+    try {
+      data = await bcfFetch(req, `/bcf/3.0/projects/${req.params.projectId}/topics`, {
+        method: 'POST',
+        body: req.body,
+      });
+    } catch {
+      data = await bcfFetch(req, `/bcf/2.1/projects/${req.params.projectId}/topics`, {
+        method: 'POST',
+        body: req.body,
+      });
+    }
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Get BCF topic comments
+app.get('/api/projects/:projectId/bcf/topics/:topicId/comments', requireAuth, async (req, res) => {
+  try {
+    let data;
+    try {
+      data = await bcfFetch(req, `/bcf/3.0/projects/${req.params.projectId}/topics/${req.params.topicId}/comments`);
+    } catch {
+      data = await bcfFetch(req, `/bcf/2.1/projects/${req.params.projectId}/topics/${req.params.topicId}/comments`);
+    }
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ─── VIEWS PROXY ────────────────────────────────────────────────────────────
+
+app.get('/api/projects/:projectId/views', requireAuth, async (req, res) => {
+  try {
+    const data = await tcFetch(req, `/views?projectId=${req.params.projectId}`);
+    res.json(data);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/views/:viewId/thumbnail', requireAuth, async (req, res) => {
+  try {
+    const url = `${req.baseUrl}/views/${req.params.viewId}/thumbnail`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${req.accessToken}` },
+    });
+    if (!response.ok) throw { status: response.status, message: 'Thumbnail not found' };
+    const buffer = await response.arrayBuffer();
+    res.set('Content-Type', response.headers.get('Content-Type') || 'image/png');
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ─── WORKFLOW STORAGE ROUTES (TURSO/SQLITE) ────────────────────────────────
+// Persistance via Turso (production) ou SQLite local (dev)
+// Fallback en in-memory si la DB n'est pas disponible
+
+import * as db from './db/database.js';
+
+let dbReady = false;
+const workflowStore = new Map(); // Fallback in-memory
+const instanceStore = new Map();
+
+// Initialize database on first request
+async function ensureDb() {
+  if (dbReady) return true;
+  try {
+    await db.initializeDatabase();
+    dbReady = true;
+    console.log('[Backend] Turso/SQLite database ready');
+    return true;
+  } catch (err) {
+    console.warn('[Backend] Database init failed, using in-memory fallback:', err.message);
+    return false;
+  }
+}
+
+// List workflow definitions
+app.get('/api/workflows', requireAuth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId;
+    if (await ensureDb()) {
+      const workflows = await db.getWorkflowDefinitions(projectId);
+      return res.json(workflows);
+    }
+    const workflows = Array.from(workflowStore.values()).filter((w) => w.projectId === projectId);
+    res.json(workflows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get workflow definition
+app.get('/api/workflows/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const workflow = await db.getWorkflowDefinition(req.params.id);
+      if (!workflow) return res.status(404).json({ error: 'Workflow not found' });
+      return res.json(workflow);
+    }
+    const workflow = workflowStore.get(req.params.id);
+    if (!workflow) return res.status(404).json({ error: 'Workflow not found' });
+    res.json(workflow);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create workflow definition
+app.post('/api/workflows', requireAuth, async (req, res) => {
+  try {
+    const workflow = { ...req.body, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    if (await ensureDb()) {
+      await db.createWorkflowDefinition(workflow);
+    } else {
+      workflowStore.set(workflow.id, workflow);
+    }
+    res.status(201).json(workflow);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update workflow definition
+app.put('/api/workflows/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const updated = await db.updateWorkflowDefinition(req.params.id, req.body);
+      return res.json(updated);
+    }
+    const existing = workflowStore.get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Workflow not found' });
+    const updated = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
+    workflowStore.set(req.params.id, updated);
+    res.json(updated);
+  } catch (error) {
+    res.status(error.message === 'Not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+// Delete workflow definition
+app.delete('/api/workflows/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.deleteWorkflowDefinition(req.params.id);
+    } else {
+      workflowStore.delete(req.params.id);
+    }
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── WORKFLOW INSTANCE ROUTES ───────────────────────────────────────────────
+
+// List instances
+app.get('/api/workflow-instances', requireAuth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId;
+    if (await ensureDb()) {
+      const instances = await db.getWorkflowInstances(projectId);
+      return res.json(instances);
+    }
+    const instances = Array.from(instanceStore.values()).filter((i) => i.projectId === projectId);
+    res.json(instances);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get instance
+app.get('/api/workflow-instances/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const instance = await db.getWorkflowInstance(req.params.id);
+      if (!instance) return res.status(404).json({ error: 'Instance not found' });
+      return res.json(instance);
+    }
+    const instance = instanceStore.get(req.params.id);
+    if (!instance) return res.status(404).json({ error: 'Instance not found' });
+    res.json(instance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create instance (start workflow for a document)
+app.post('/api/workflow-instances', requireAuth, async (req, res) => {
+  try {
+    const instance = {
+      ...req.body,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      history: req.body.history || [],
+      reviews: req.body.reviews || [],
+    };
+    if (await ensureDb()) {
+      await db.createWorkflowInstance(instance);
+    } else {
+      instanceStore.set(instance.id, instance);
+    }
+    res.status(201).json(instance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update instance (status change, review submission)
+app.put('/api/workflow-instances/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const updated = await db.updateWorkflowInstance(req.params.id, req.body);
+      return res.json(updated);
+    }
+    const existing = instanceStore.get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Instance not found' });
+    const updated = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
+    instanceStore.set(req.params.id, updated);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Submit review/visa
+app.post('/api/workflow-instances/:id/reviews', requireAuth, async (req, res) => {
+  try {
+    const review = {
+      ...req.body,
+      reviewedAt: new Date().toISOString(),
+      isCompleted: true,
+    };
+
+    if (await ensureDb()) {
+      // Get current instance, add review, update
+      const instance = await db.getWorkflowInstance(req.params.id);
+      if (!instance) return res.status(404).json({ error: 'Instance not found' });
+
+      const reviews = [...(instance.reviews || []), review];
+      const historyEntry = {
+        id: `hist-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        fromNodeId: instance.currentNodeId,
+        toNodeId: instance.currentNodeId,
+        fromStatusId: instance.currentStatusId,
+        toStatusId: review.statusId || instance.currentStatusId,
+        userId: review.reviewerId,
+        userName: review.reviewerName,
+        action: `Visa: ${review.decision}`,
+        comment: review.comment,
+      };
+      const history = [...(instance.history || []), historyEntry];
+      const updated = await db.updateWorkflowInstance(req.params.id, { reviews, history });
+      return res.json(updated);
+    }
+
+    // Fallback in-memory
+    const instance = instanceStore.get(req.params.id);
+    if (!instance) return res.status(404).json({ error: 'Instance not found' });
+
+    instance.reviews = [...(instance.reviews || []), review];
+    instance.updatedAt = new Date().toISOString();
+    instance.history = [...(instance.history || []), {
+      id: `hist-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      fromNodeId: instance.currentNodeId,
+      toNodeId: instance.currentNodeId,
+      fromStatusId: instance.currentStatusId,
+      toStatusId: review.statusId || instance.currentStatusId,
+      userId: review.reviewerId,
+      userName: review.reviewerName,
+      action: `Visa: ${review.decision}`,
+      comment: review.comment,
+    }];
+
+    instanceStore.set(req.params.id, instance);
+    res.json(instance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── OAUTH ROUTES (standalone mode) ─────────────────────────────────────────
+
+const TRIMBLE_AUTH_URL = process.env.TRIMBLE_ENVIRONMENT === 'staging'
+  ? 'https://stage.id.trimble.com/oauth/token'
+  : 'https://id.trimble.com/oauth/token';
+
+// Token exchange (code → access_token)
+app.post('/api/auth/token', async (req, res) => {
+  try {
+    const { code, redirect_uri } = req.body;
+
+    if (!code) return res.status(400).json({ error: 'Missing code' });
+
+    const response = await fetch(TRIMBLE_AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirect_uri || process.env.TRIMBLE_REDIRECT_URI || '',
+        client_id: process.env.TRIMBLE_CLIENT_ID || '',
+        client_secret: process.env.TRIMBLE_CLIENT_SECRET || '',
+      }).toString(),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).json({ error: text });
+    }
+
+    const tokenData = await response.json();
+    res.json(tokenData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Token refresh
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) return res.status(400).json({ error: 'Missing refresh_token' });
+
+    const response = await fetch(TRIMBLE_AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token,
+        client_id: process.env.TRIMBLE_CLIENT_ID || '',
+        client_secret: process.env.TRIMBLE_CLIENT_SECRET || '',
+      }).toString(),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).json({ error: text });
+    }
+
+    const tokenData = await response.json();
+    res.json(tokenData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── HEALTH CHECK ───────────────────────────────────────────────────────────
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ─── START SERVER ───────────────────────────────────────────────────────────
+
+app.listen(PORT, () => {
+  console.log(`[Backend] Server running on port ${PORT}`);
+});
+
+export default app;

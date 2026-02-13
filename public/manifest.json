@@ -1,0 +1,28 @@
+{
+  "name": "Validation Documentaire BIM",
+  "version": "1.0.0",
+  "api": "1.0",
+  "extensions": [
+    {
+      "type": "projectModule",
+      "id": "validation-doc",
+      "title": "Validation Documentaire",
+      "icon": "icon-48.png",
+      "url": "index.html",
+      "description": "Gestion des workflows de validation documentaire BIM avec suivi des visas, révisions et approbations.",
+      "enabled": true,
+      "configCommand": "settings"
+    }
+  ],
+  "permissions": [
+    "project.read",
+    "files.read",
+    "files.write",
+    "bcf.read",
+    "bcf.write",
+    "views.read",
+    "todos.read",
+    "todos.write",
+    "users.read"
+  ]
+}
