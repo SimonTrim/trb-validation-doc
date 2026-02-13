@@ -56,7 +56,11 @@ export const useAppStore = create<AppState>((set) => ({
   notifications: [],
   theme: 'light',
 
-  setCurrentView: (view) => set({ currentView: view }),
+  setCurrentView: (view) => {
+    // Safety: TC may pass non-string values — coerce to string
+    const safeView = (typeof view === 'string' ? view : 'dashboard') as AppView;
+    set({ currentView: safeView });
+  },
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   addNotification: (notification) =>

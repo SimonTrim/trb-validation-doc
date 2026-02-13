@@ -143,10 +143,13 @@ function handleEvent(event: string, data: any) {
       }
       break;
 
-    case 'extension.command':
-      // Menu navigation from Trimble Connect — use static import (no require())
-      useAppStore.getState().setCurrentView(data);
+    case 'extension.command': {
+      // TC sends command as object {data: "command"} or string "command"
+      const command = typeof data === 'string' ? data : data?.data || data?.command || 'dashboard';
+      console.log('[WorkspaceAPI] Command received:', data, '→ resolved:', command);
+      useAppStore.getState().setCurrentView(command);
       break;
+    }
 
     case 'extension.userSettingsChanged':
       console.log('[WorkspaceAPI] User settings changed');

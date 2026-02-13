@@ -102,7 +102,7 @@ export function AppLayout() {
           <div className="flex items-center justify-between border-b bg-background/80 backdrop-blur-sm px-6 py-2 shrink-0">
             <div className="flex items-center gap-4">
               <div className="text-sm font-medium text-muted-foreground capitalize">
-                {currentView === 'workflow-list' ? 'Workflows' : currentView === 'visa' ? 'Visas & Revues' : currentView}
+                {currentView === 'workflow-list' ? 'Workflows' : currentView === 'visa' ? 'Visas & Revues' : String(currentView)}
               </div>
               <div className="h-4 w-px bg-border" />
               <MiniStats />
