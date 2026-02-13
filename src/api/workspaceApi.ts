@@ -113,18 +113,18 @@ export async function initWorkspaceApi(): Promise<boolean> {
 function setupMenu() {
   if (!workspaceApi?.ui?.setMenu) return;
 
-  const iconBase = `${EXTENSION_BASE_URL}/icon_workflow_white.png`;
+  const icon = (name: string) => `${EXTENSION_BASE_URL}/${name}`;
 
   workspaceApi.ui.setMenu({
     title: 'Validation',
-    icon: iconBase,
+    icon: icon('icon_workflow_white.png'),
     command: 'dashboard',
     subMenus: [
-      { title: 'Tableau de bord', command: 'dashboard', icon: iconBase },
-      { title: 'Documents', command: 'documents', icon: iconBase },
-      { title: 'Visas', command: 'visa', icon: iconBase },
-      { title: 'Workflows', command: 'workflow-list', icon: iconBase },
-      { title: 'Historique', command: 'history', icon: iconBase },
+      { title: 'Tableau de bord', command: 'dashboard', icon: icon('icon_tableau_bord_white.png') },
+      { title: 'Documents', command: 'documents', icon: icon('icon_documents_white.png') },
+      { title: 'Visas', command: 'visa', icon: icon('icon_visas_white.png') },
+      { title: 'Workflows', command: 'workflow-list', icon: icon('icon_validation_white.png') },
+      { title: 'Historique', command: 'history', icon: icon('icon_historique_white.png') },
     ],
   });
 }

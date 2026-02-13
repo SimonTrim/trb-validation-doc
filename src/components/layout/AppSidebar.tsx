@@ -1,8 +1,7 @@
 import React from 'react';
 import {
-  LayoutDashboard, FileText, GitBranch, UserCheck,
-  History, Settings, Bell, ChevronLeft, ChevronRight,
-  FileCheck, Sun, Moon, Monitor,
+  Settings, ChevronLeft, ChevronRight,
+  Sun, Moon, Monitor,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,12 +12,24 @@ import { useDocumentStore } from '@/stores/documentStore';
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { cn } from '@/lib/utils';
 
+/** Icône PNG custom depuis /public — s'adapte au thème via CSS filter */
+function PngIcon({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={cn('h-5 w-5 dark:brightness-0 dark:invert', className)}
+      style={{ filter: 'var(--icon-filter, brightness(0))' }}
+    />
+  );
+}
+
 interface NavItem {
   id: AppView;
   label: string;
   icon: React.ReactNode;
   badge?: number;
-  shortcut?: string; // Keyboard shortcut hint
+  shortcut?: string;
 }
 
 export function AppSidebar() {
@@ -30,11 +41,11 @@ export function AppSidebar() {
   const unreadNotifs = notifications.filter((n) => !n.read).length;
 
   const mainNav: NavItem[] = [
-    { id: 'dashboard', label: 'Tableau de bord', icon: <LayoutDashboard className="h-5 w-5" />, shortcut: 'Alt+D' },
-    { id: 'documents', label: 'Documents', icon: <FileText className="h-5 w-5" />, badge: pendingCount, shortcut: 'Alt+F' },
-    { id: 'visa', label: 'Visas', icon: <UserCheck className="h-5 w-5" />, badge: pendingVisas, shortcut: 'Alt+V' },
-    { id: 'workflow-list', label: 'Workflows', icon: <GitBranch className="h-5 w-5" />, shortcut: 'Alt+W' },
-    { id: 'history', label: 'Historique', icon: <History className="h-5 w-5" />, shortcut: 'Alt+H' },
+    { id: 'dashboard', label: 'Tableau de bord', icon: <PngIcon src="/icon_tableau_bord_white.png" alt="Dashboard" />, shortcut: 'Alt+D' },
+    { id: 'documents', label: 'Documents', icon: <PngIcon src="/icon_documents_white.png" alt="Documents" />, badge: pendingCount, shortcut: 'Alt+F' },
+    { id: 'visa', label: 'Visas', icon: <PngIcon src="/icon_visas_white.png" alt="Visas" />, badge: pendingVisas, shortcut: 'Alt+V' },
+    { id: 'workflow-list', label: 'Workflows', icon: <PngIcon src="/icon_validation_white.png" alt="Workflows" />, shortcut: 'Alt+W' },
+    { id: 'history', label: 'Historique', icon: <PngIcon src="/icon_historique_white.png" alt="Historique" />, shortcut: 'Alt+H' },
   ];
 
   const bottomNav: NavItem[] = [
@@ -103,12 +114,12 @@ export function AppSidebar() {
         )}>
           {!sidebarCollapsed && (
             <div className="flex items-center gap-2">
-              <FileCheck className="h-5 w-5 text-primary" />
+              <img src="/icon_workflow_white.png" alt="Validation" className="h-5 w-5" style={{ filter: 'brightness(0) saturate(100%) invert(19%) sepia(96%) saturate(1592%) hue-rotate(196deg) brightness(96%) contrast(103%)' }} />
               <span className="text-sm font-bold text-primary">Validation</span>
             </div>
           )}
           {sidebarCollapsed && (
-            <FileCheck className="h-5 w-5 text-primary" />
+            <img src="/icon_workflow_white.png" alt="Validation" className="h-5 w-5" style={{ filter: 'brightness(0) saturate(100%) invert(19%) sepia(96%) saturate(1592%) hue-rotate(196deg) brightness(96%) contrast(103%)' }} />
           )}
         </div>
 
