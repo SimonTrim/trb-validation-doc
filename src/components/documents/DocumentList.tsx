@@ -365,12 +365,21 @@ export function DocumentList() {
       {
         accessorKey: 'uploadedByName',
         header: 'Déposé par',
-        cell: ({ row }) => (
-          <div className="text-sm">
-            <div>{row.original.uploadedByName}</div>
-            <div className="text-xs text-muted-foreground">{row.original.uploadedByEmail}</div>
-          </div>
-        ),
+        cell: ({ row }) => {
+          // Guard against uploadedByName/uploadedByEmail being objects (TC API can return user objects)
+          const name = typeof row.original.uploadedByName === 'object'
+            ? (row.original.uploadedByName as any)?.firstName || (row.original.uploadedByName as any)?.email || ''
+            : String(row.original.uploadedByName || '');
+          const email = typeof row.original.uploadedByEmail === 'object'
+            ? (row.original.uploadedByEmail as any)?.email || ''
+            : String(row.original.uploadedByEmail || '');
+          return (
+            <div className="text-sm">
+              <div>{name}</div>
+              {email && <div className="text-xs text-muted-foreground">{email}</div>}
+            </div>
+          );
+        },
       },
       {
         accessorKey: 'reviewers',

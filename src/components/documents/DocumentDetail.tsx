@@ -269,7 +269,7 @@ export function DocumentDetail() {
                       <User className="h-4 w-4 text-muted-foreground" />
                       <div>
                         <div className="text-xs text-muted-foreground">Déposé par</div>
-                        <div className="text-sm font-medium">{doc.uploadedByName}</div>
+                        <div className="text-sm font-medium">{typeof doc.uploadedByName === 'object' ? (doc.uploadedByName as any)?.firstName || (doc.uploadedByName as any)?.email || '' : String(doc.uploadedByName || '')}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -525,7 +525,7 @@ export function DocumentDetail() {
                             <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {ver.uploadedByName}
+                                {typeof ver.uploadedByName === 'object' ? (ver.uploadedByName as any)?.firstName || '' : String(ver.uploadedByName || '')}
                               </span>
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />

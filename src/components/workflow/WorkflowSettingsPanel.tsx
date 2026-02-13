@@ -182,6 +182,11 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
         if (existingFileIds.has(file.id)) continue; // Skip already imported
 
         const authState = useAuthStore.getState();
+        // TC API may return uploadedBy as a user object — extract string
+        const rawUploader = (file as any).uploadedBy || (file as any).createdBy;
+        const uploaderName = typeof rawUploader === 'object'
+          ? (rawUploader?.firstName ? `${rawUploader.firstName} ${rawUploader.lastName || ''}`.trim() : rawUploader?.email || '')
+          : (typeof rawUploader === 'string' ? rawUploader : '');
         const doc = {
           id: generateId(),
           fileId: file.id,
@@ -189,9 +194,9 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
           fileExtension: (file as any).extension || '',
           fileSize: (file as any).size || 0,
           filePath: (file as any).path || '',
-          uploadedBy: (file as any).uploadedBy || authState.currentUser?.id || '',
-          uploadedByName: (file as any).uploadedBy || authState.currentUser?.firstName || 'Utilisateur',
-          uploadedByEmail: authState.currentUser?.email || '',
+          uploadedBy: uploaderName || authState.currentUser?.id || '',
+          uploadedByName: uploaderName || authState.currentUser?.firstName || 'Utilisateur',
+          uploadedByEmail: (typeof rawUploader === 'object' ? rawUploader?.email : '') || authState.currentUser?.email || '',
           uploadedAt: (file as any).uploadedAt || new Date().toISOString(),
           lastModified: (file as any).lastModified || new Date().toISOString(),
           versionNumber: 1,

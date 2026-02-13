@@ -82,6 +82,20 @@ async function tcFetch(req, endpoint, options = {}) {
 
 // ─── RESPONSE MAPPERS ───────────────────────────────────────────────────────
 
+/** Extract a display name from a TC user field (can be string or object) */
+function extractUserString(val) {
+  if (!val) return '';
+  if (typeof val === 'string') return val;
+  // TC API may return user as object: {id, tiduuid, email, firstName, lastName, status}
+  if (typeof val === 'object') {
+    if (val.firstName || val.lastName) return `${val.firstName || ''} ${val.lastName || ''}`.trim();
+    if (val.email) return val.email;
+    if (val.id) return val.id;
+    return JSON.stringify(val);
+  }
+  return String(val);
+}
+
 /** Map TC Search/File API response to normalized ConnectFile format */
 function mapTcFileToConnectFile(item) {
   return {
@@ -89,7 +103,7 @@ function mapTcFileToConnectFile(item) {
     name: item.name || item.fileName || '',
     extension: (item.name || '').split('.').pop()?.toLowerCase() || '',
     size: item.size || item.fileSize || 0,
-    uploadedBy: item.createdBy || item.uploadedBy || item.creator || '',
+    uploadedBy: extractUserString(item.createdBy || item.uploadedBy || item.creator),
     uploadedAt: item.createdOn || item.uploadedAt || item.createdAt || '',
     lastModified: item.modifiedOn || item.lastModified || item.modifiedAt || item.createdOn || '',
     parentId: item.parentId || item.folderId || '',
