@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Trash2, Plus, UserPlus, Users, UserCheck, Shield, Mail } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Trash2, Plus, UserPlus, Users, UserCheck, Shield, Mail, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -7,7 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { useWorkflowStore } from '@/stores/workflowStore';
+import { useAuthStore } from '@/stores/authStore';
+import { getProjectUsers } from '@/api/trimbleService';
 import type { WorkflowNodeData } from '@/models/workflow';
+import type { ConnectUser } from '@/models/trimble';
 
 /** Structure d'un reviewer assigné à un noeud review */
 interface NodeReviewer {
@@ -16,16 +19,6 @@ interface NodeReviewer {
   email: string;
   role: 'reviewer' | 'approver' | 'validator';
 }
-
-/** Demo users for assignment */
-const AVAILABLE_USERS: NodeReviewer[] = [
-  { id: 'user-1', name: 'Marie Dupont', email: 'marie.dupont@example.com', role: 'reviewer' },
-  { id: 'user-2', name: 'Pierre Martin', email: 'pierre.martin@example.com', role: 'approver' },
-  { id: 'user-3', name: 'Sophie Laurent', email: 'sophie.laurent@example.com', role: 'validator' },
-  { id: 'user-4', name: 'Jean Durand', email: 'jean.durand@example.com', role: 'reviewer' },
-  { id: 'user-5', name: 'Claire Bernard', email: 'claire.bernard@example.com', role: 'reviewer' },
-  { id: 'user-6', name: 'Thomas Petit', email: 'thomas.petit@example.com', role: 'approver' },
-];
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   reviewer: { label: 'Réviseur', color: 'bg-blue-100 text-blue-700' },
@@ -236,6 +229,30 @@ function ReviewerConfigSection({
 }) {
   const [showAddUser, setShowAddUser] = useState(false);
   const [searchUser, setSearchUser] = useState('');
+  const [projectUsers, setProjectUsers] = useState<NodeReviewer[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Load real project users
+  useEffect(() => {
+    const { project, accessToken } = useAuthStore.getState();
+    if (!project?.id || !accessToken) return;
+
+    setLoadingUsers(true);
+    getProjectUsers(project.id)
+      .then((users: ConnectUser[]) => {
+        const mapped: NodeReviewer[] = users.map((u) => ({
+          id: u.id,
+          name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+          email: u.email,
+          role: 'reviewer' as const,
+        }));
+        setProjectUsers(mapped);
+      })
+      .catch((err) => {
+        console.warn('[NodeConfigPanel] Failed to load project users:', err);
+      })
+      .finally(() => setLoadingUsers(false));
+  }, []);
 
   // Parse current assignees into structured data
   const assignees: string[] = (nodeData.assignees as string[]) || [];
@@ -268,7 +285,7 @@ function ReviewerConfigSection({
     });
   };
 
-  const filteredUsers = AVAILABLE_USERS.filter(
+  const filteredUsers = projectUsers.filter(
     (u) =>
       !assignees.includes(u.id) &&
       (u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
@@ -364,7 +381,12 @@ function ReviewerConfigSection({
               autoFocus
             />
             <div className="max-h-32 overflow-y-auto space-y-0.5">
-              {filteredUsers.length === 0 ? (
+              {loadingUsers ? (
+                <div className="flex items-center justify-center py-2 text-[10px] text-muted-foreground">
+                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  Chargement...
+                </div>
+              ) : filteredUsers.length === 0 ? (
                 <p className="text-[10px] text-muted-foreground text-center py-2">
                   Aucun utilisateur trouvé
                 </p>

@@ -124,6 +124,35 @@ CREATE INDEX IF NOT EXISTS idx_val_doc_status   ON validation_documents(status_i
 CREATE INDEX IF NOT EXISTS idx_val_doc_file     ON validation_documents(file_id);
 CREATE INDEX IF NOT EXISTS idx_val_doc_workflow ON validation_documents(workflow_instance_id);
 
+-- ── Commentaires sur les documents ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS document_comments (
+  id                TEXT PRIMARY KEY,
+  document_id       TEXT NOT NULL REFERENCES validation_documents(id),
+  author_id         TEXT NOT NULL,
+  author_name       TEXT NOT NULL,
+  author_email      TEXT DEFAULT '',
+  content           TEXT NOT NULL,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  parent_id         TEXT,
+  is_system_message INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_comments_doc ON document_comments(document_id);
+CREATE INDEX IF NOT EXISTS idx_doc_comments_parent ON document_comments(parent_id);
+
+-- ── Labels sur les documents ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS document_labels (
+  document_id TEXT NOT NULL REFERENCES validation_documents(id),
+  label_id    TEXT NOT NULL,
+  label_name  TEXT NOT NULL,
+  label_color TEXT NOT NULL DEFAULT '#6a6e79',
+  PRIMARY KEY (document_id, label_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_labels_doc ON document_labels(document_id);
+
 -- ── Vue pour les statistiques ───────────────────────────────────────────────
 
 CREATE VIEW IF NOT EXISTS v_document_stats AS

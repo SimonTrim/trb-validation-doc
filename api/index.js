@@ -6,6 +6,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import * as db from './db/database.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -29,7 +30,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Project-Region'],
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
@@ -238,14 +239,49 @@ app.get('/api/files/:fileId/versions', requireAuth, async (req, res) => {
   }
 });
 
-// File upload (multipart — simplified proxy)
+// File upload — step 1: create file metadata, step 2: upload content
+// For iframe context, the frontend sends file as base64 in the JSON body
 app.post('/api/projects/:projectId/files', requireAuth, async (req, res) => {
   try {
-    const data = await tcFetch(req, '/files', {
+    const { fileName, folderId, fileBase64, mimeType } = req.body;
+
+    if (!fileName || !folderId) {
+      return res.status(400).json({ error: 'fileName and folderId are required' });
+    }
+
+    // Step 1: Create file entry in TC
+    const fileEntry = await tcFetch(req, '/files', {
       method: 'POST',
-      body: req.body,
+      body: {
+        name: fileName,
+        parentId: folderId,
+      },
     });
-    res.json(data);
+
+    const fileId = fileEntry.id || fileEntry.fileId;
+
+    // Step 2: Upload binary content if provided
+    if (fileBase64 && fileId) {
+      const buffer = Buffer.from(fileBase64, 'base64');
+      const uploadUrl = `${req.baseUrl}/files/${fileId}/content`;
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${req.accessToken}`,
+          'Content-Type': mimeType || 'application/octet-stream',
+          'Content-Length': buffer.length.toString(),
+        },
+        body: buffer,
+      });
+
+      if (!uploadResponse.ok) {
+        const text = await uploadResponse.text();
+        console.warn('[Upload] Content upload failed:', text);
+        // File metadata was created, return it anyway
+      }
+    }
+
+    res.json(mapTcFileToConnectFile(fileEntry));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -366,15 +402,12 @@ app.get('/api/views/:viewId/thumbnail', requireAuth, async (req, res) => {
   }
 });
 
-// ─── WORKFLOW STORAGE ROUTES (TURSO/SQLITE) ────────────────────────────────
-// Persistance via Turso (production) ou SQLite local (dev)
-// Fallback en in-memory si la DB n'est pas disponible
-
-import * as db from './db/database.js';
+// ─── DATABASE ───────────────────────────────────────────────────────────────
 
 let dbReady = false;
 const workflowStore = new Map(); // Fallback in-memory
 const instanceStore = new Map();
+const documentMemStore = new Map(); // Fallback in-memory for documents
 
 // Initialize database on first request
 async function ensureDb() {
@@ -389,6 +422,215 @@ async function ensureDb() {
     return false;
   }
 }
+
+// ─── PROJECT FOLDERS ────────────────────────────────────────────────────────
+
+// Get project root folder ID then list its contents
+app.get('/api/projects/:projectId/folders', requireAuth, async (req, res) => {
+  try {
+    // TC API: GET /projects/{projectId} returns project info with rootFolderId
+    const project = await tcFetch(req, `/projects/${req.params.projectId}`);
+    const rootFolderId = project.rootId || project.rootFolderId;
+    if (!rootFolderId) {
+      return res.json([]);
+    }
+    // Get root folder contents (folders only)
+    const raw = await tcFetch(req, `/folders/${rootFolderId}/items`);
+    const items = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
+    // TC items can have type 'FOLDER' or be identified by lack of size/extension
+    const folders = items
+      .filter((item) => {
+        const itemType = (item.type || '').toUpperCase();
+        return itemType === 'FOLDER' || itemType === 'DIR' || 
+               (item.id && !item.size && !item.extension && item.name);
+      })
+      .map((f) => ({ id: f.id, name: f.name, parentId: f.parentId || rootFolderId }));
+    // Prepend root
+    const rootName = project.name || 'Racine du projet';
+    res.json([{ id: rootFolderId, name: rootName, parentId: null }, ...folders]);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Get subfolders of a specific folder
+app.get('/api/folders/:folderId/subfolders', requireAuth, async (req, res) => {
+  try {
+    const raw = await tcFetch(req, `/folders/${req.params.folderId}/items`);
+    const items = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
+    const folders = items
+      .filter((item) => {
+        const itemType = (item.type || '').toUpperCase();
+        return itemType === 'FOLDER' || itemType === 'DIR' ||
+               (item.id && !item.size && !item.extension && item.name);
+      })
+      .map((f) => ({ id: f.id, name: f.name, parentId: f.parentId || req.params.folderId }));
+    res.json(folders);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ─── VALIDATION DOCUMENT ROUTES (TURSO) ────────────────────────────────────
+
+// List validation documents for a project
+app.get('/api/documents', requireAuth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId;
+    if (await ensureDb()) {
+      const docs = await db.getValidationDocuments(projectId);
+      // Enrich with labels
+      for (const doc of docs) {
+        doc.labels = await db.getDocumentLabels(doc.id);
+      }
+      return res.json(docs);
+    }
+    // Fallback in-memory
+    const docs = Array.from(documentMemStore.values()).filter((d) => d.projectId === projectId);
+    res.json(docs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single validation document
+app.get('/api/documents/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const doc = await db.getValidationDocument(req.params.id);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      doc.labels = await db.getDocumentLabels(doc.id);
+      doc.comments = await db.getDocumentComments(doc.id);
+      return res.json(doc);
+    }
+    const doc = documentMemStore.get(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    res.json(doc);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create validation document (register a TC file for validation)
+app.post('/api/documents', requireAuth, async (req, res) => {
+  try {
+    const doc = {
+      ...req.body,
+      uploadedAt: req.body.uploadedAt || new Date().toISOString(),
+      lastModified: req.body.lastModified || new Date().toISOString(),
+    };
+    if (await ensureDb()) {
+      await db.createValidationDocument(doc);
+      // Set labels if provided
+      if (doc.labels && doc.labels.length > 0) {
+        await db.setDocumentLabels(doc.id, doc.labels);
+      }
+    } else {
+      documentMemStore.set(doc.id, doc);
+    }
+    res.status(201).json(doc);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update validation document
+app.put('/api/documents/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const updated = await db.updateValidationDocument(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ error: 'Document not found' });
+      // Update labels if provided
+      if (req.body.labels !== undefined) {
+        await db.setDocumentLabels(req.params.id, req.body.labels || []);
+        updated.labels = req.body.labels;
+      }
+      return res.json(updated);
+    }
+    const existing = documentMemStore.get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Document not found' });
+    const updated = { ...existing, ...req.body, lastModified: new Date().toISOString() };
+    documentMemStore.set(req.params.id, updated);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete validation document
+app.delete('/api/documents/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.deleteValidationDocument(req.params.id);
+    } else {
+      documentMemStore.delete(req.params.id);
+    }
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── DOCUMENT COMMENT ROUTES ───────────────────────────────────────────────
+
+// List comments for a document
+app.get('/api/documents/:docId/comments', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const comments = await db.getDocumentComments(req.params.docId);
+      return res.json(comments);
+    }
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add comment to a document
+app.post('/api/documents/:docId/comments', requireAuth, async (req, res) => {
+  try {
+    const comment = {
+      ...req.body,
+      documentId: req.params.docId,
+      createdAt: req.body.createdAt || new Date().toISOString(),
+    };
+    if (await ensureDb()) {
+      await db.createDocumentComment(comment);
+    }
+    res.status(201).json(comment);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete comment
+app.delete('/api/documents/:docId/comments/:commentId', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.deleteDocumentComment(req.params.commentId);
+    }
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── DOCUMENT LABEL ROUTES ─────────────────────────────────────────────────
+
+// Update labels for a document
+app.put('/api/documents/:docId/labels', requireAuth, async (req, res) => {
+  try {
+    const labels = req.body.labels || [];
+    if (await ensureDb()) {
+      await db.setDocumentLabels(req.params.docId, labels);
+    }
+    res.json({ labels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── WORKFLOW STORAGE ROUTES (TURSO/SQLITE) ────────────────────────────────
 
 // List workflow definitions
 app.get('/api/workflows', requireAuth, async (req, res) => {

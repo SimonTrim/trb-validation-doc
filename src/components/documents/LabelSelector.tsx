@@ -14,6 +14,7 @@ import {
 import { DEFAULT_LABELS, type DocumentLabel } from '@/models/document';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useLabelStore } from '@/stores/labelStore';
+import { updateDocumentLabels } from '@/api/documentApiService';
 import { generateId } from '@/lib/utils';
 
 interface LabelSelectorProps {
@@ -44,6 +45,11 @@ export function LabelSelector({ documentId, currentLabels }: LabelSelectorProps)
       newLabels = [...currentLabels, label];
     }
     updateDocument(documentId, { labels: newLabels });
+
+    // Persist to backend (non-blocking)
+    updateDocumentLabels(documentId, newLabels).catch((err) => {
+      console.warn('[LabelSelector] Failed to persist labels:', err);
+    });
   };
 
   const handleCreateCustomLabel = () => {
@@ -60,8 +66,14 @@ export function LabelSelector({ documentId, currentLabels }: LabelSelectorProps)
     addCustomLabel(newLabel);
 
     // 2. Add to current document
-    updateDocument(documentId, { labels: [...currentLabels, newLabel] });
+    const newLabels = [...currentLabels, newLabel];
+    updateDocument(documentId, { labels: newLabels });
     setSearch('');
+
+    // 3. Persist to backend (non-blocking)
+    updateDocumentLabels(documentId, newLabels).catch((err) => {
+      console.warn('[LabelSelector] Failed to persist new label:', err);
+    });
   };
 
   // Check if exact match exists in all labels

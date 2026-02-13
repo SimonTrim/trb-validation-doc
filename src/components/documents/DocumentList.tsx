@@ -43,7 +43,11 @@ import { useDocumentStore } from '@/stores/documentStore';
 import { useLabelStore } from '@/stores/labelStore';
 import { useWorkflowEngine } from '@/hooks/useWorkflowEngine';
 import { openInViewer, openForAnnotation, canOpenInViewer, getViewerType } from '@/lib/viewerIntegration';
+import { getFileDownloadUrl, uploadFile } from '@/api/trimbleService';
+import { createValidationDocument } from '@/api/documentApiService';
+import { useAuthStore } from '@/stores/authStore';
 import { formatDate, formatFileSize } from '@/lib/utils';
+import { toast } from 'sonner';
 import type { ValidationDocument } from '@/models/document';
 
 /** Status definitions for filter display */
@@ -91,43 +95,70 @@ export function DocumentList() {
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     dragCounter.current = 0;
-    const files = Array.from(e.dataTransfer.files);
-    for (const file of files) {
+
+    const { project, currentUser } = useAuthStore.getState();
+    const projectId = project?.id || '';
+    const userId = currentUser?.id || 'unknown';
+    const userName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Inconnu';
+    const userEmail = currentUser?.email || '';
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+
+    for (const file of droppedFiles) {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      const newDoc: ValidationDocument = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        fileId: `file-${Date.now()}`,
-        fileName: file.name,
-        fileExtension: ext,
-        fileSize: file.size,
-        filePath: `/Dépôt/${file.name}`,
-        uploadedBy: 'user-1',
-        uploadedByName: 'Utilisateur courant',
-        uploadedByEmail: 'user@example.com',
-        uploadedAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
-        versionNumber: 1,
-        projectId: 'proj-1',
-        currentStatus: { id: 'pending', name: 'En attente', color: '#6a6e79', changedAt: new Date().toISOString(), changedBy: 'Système' },
-        reviewers: [],
-        comments: [],
-        labels: [],
-        versionHistory: [{
-          versionNumber: 1,
-          versionId: `v-${Date.now()}`,
+      const now = new Date().toISOString();
+
+      // Try to upload to TC and register in Turso
+      try {
+        // Attempt to upload to TC if a source folder is configured
+        // For now, create a local document entry and persist to backend
+        const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const newDoc: ValidationDocument = {
+          id: docId,
+          fileId: `file-${Date.now()}`,
           fileName: file.name,
+          fileExtension: ext,
           fileSize: file.size,
-          uploadedBy: 'user-1',
-          uploadedByName: 'Utilisateur courant',
-          uploadedAt: new Date().toISOString(),
-        }],
-        metadata: {},
-      };
-      addDocument(newDoc);
+          filePath: `/${file.name}`,
+          uploadedBy: userId,
+          uploadedByName: userName,
+          uploadedByEmail: userEmail,
+          uploadedAt: now,
+          lastModified: now,
+          versionNumber: 1,
+          projectId,
+          currentStatus: { id: 'pending', name: 'En attente', color: '#6a6e79', changedAt: now, changedBy: 'Système' },
+          reviewers: [],
+          comments: [],
+          labels: [],
+          versionHistory: [{
+            versionNumber: 1,
+            versionId: `v-${Date.now()}`,
+            fileName: file.name,
+            fileSize: file.size,
+            uploadedBy: userId,
+            uploadedByName: userName,
+            uploadedAt: now,
+          }],
+          metadata: {},
+        };
+
+        addDocument(newDoc);
+
+        // Persist to backend (non-blocking)
+        createValidationDocument(newDoc).catch((err) => {
+          console.warn('[DocumentList] Failed to persist document:', err);
+        });
+
+        toast.success('Document ajouté', { description: `"${file.name}" est en attente de validation.` });
+      } catch (err) {
+        console.error('[DocumentList] Upload failed:', err);
+        toast.error('Erreur d\'upload', { description: `Impossible d'uploader "${file.name}".` });
+      }
     }
   }, [addDocument]);
 
@@ -440,11 +471,18 @@ export function DocumentList() {
                     Annoter le document
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={async () => {
+                  try {
+                    const { url } = await getFileDownloadUrl(doc.fileId);
+                    if (url) window.open(url, '_blank');
+                  } catch (err) {
+                    console.error('[DocumentList] Download failed:', err);
+                  }
+                }}>
                   <Download className="mr-2 h-4 w-4" />
                   Télécharger
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSelectedDocument(doc)}>
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Commenter
                 </DropdownMenuItem>

@@ -15,24 +15,27 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { TemplateSelector } from './TemplateSelector';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { DOCUMENT_VALIDATION_STATUSES } from '@/models/workflow';
 import { formatDate, generateId } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { WorkflowDefinition } from '@/models/workflow';
+import * as workflowApi from '@/api/workflowApiService';
 
 export function WorkflowList() {
   const { definitions, setActiveDefinition, addDefinition, updateDefinition, removeDefinition } = useWorkflowStore();
   const { setCurrentView } = useAppStore();
 
-  const handleCreateWorkflow = () => {
+  const handleCreateWorkflow = async () => {
+    const { project, currentUser } = useAuthStore.getState();
     const newDef: WorkflowDefinition = {
       id: generateId(),
       name: 'Nouveau workflow',
       description: 'Workflow de validation documentaire',
       version: 1,
       type: 'document_validation',
-      projectId: '',
-      createdBy: '',
+      projectId: project?.id || '',
+      createdBy: currentUser?.id || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isActive: false,
@@ -87,6 +90,11 @@ export function WorkflowList() {
     addDefinition(newDef);
     setActiveDefinition(newDef);
     setCurrentView('workflow-designer');
+
+    // Persist to backend (non-blocking)
+    workflowApi.createWorkflowDefinition(newDef).catch((err) => {
+      console.warn('[WorkflowList] Failed to persist new workflow:', err);
+    });
   };
 
   const handleOpenDesigner = (def: WorkflowDefinition) => {
@@ -100,6 +108,11 @@ export function WorkflowList() {
     updateDefinition(def.id, { isActive: newState });
     toast.success(newState ? 'Workflow activé' : 'Workflow désactivé', {
       description: `"${def.name}" est maintenant ${newState ? 'actif' : 'en brouillon'}.`,
+    });
+
+    // Persist to backend (non-blocking)
+    workflowApi.updateWorkflowDefinition(def.id, { isActive: newState }).catch((err) => {
+      console.warn('[WorkflowList] Failed to persist toggle:', err);
     });
   };
 
@@ -115,12 +128,22 @@ export function WorkflowList() {
     };
     addDefinition(copy);
     toast.success('Workflow dupliqué', { description: `"${copy.name}" créé.` });
+
+    // Persist to backend (non-blocking)
+    workflowApi.createWorkflowDefinition(copy).catch((err) => {
+      console.warn('[WorkflowList] Failed to persist duplicate:', err);
+    });
   };
 
   const handleDelete = (def: WorkflowDefinition, e: React.MouseEvent) => {
     e.stopPropagation();
     removeDefinition(def.id);
     toast.success('Workflow supprimé', { description: `"${def.name}" a été supprimé.` });
+
+    // Persist to backend (non-blocking)
+    workflowApi.deleteWorkflowDefinition(def.id).catch((err) => {
+      console.warn('[WorkflowList] Failed to persist delete:', err);
+    });
   };
 
   const handleExportTemplate = (def: WorkflowDefinition, e: React.MouseEvent) => {
@@ -160,11 +183,12 @@ export function WorkflowList() {
             toast.error('Format invalide', { description: 'Ce fichier n\'est pas un template de workflow valide.' });
             return;
           }
+          const { project, currentUser } = useAuthStore.getState();
           const newDef: WorkflowDefinition = {
             ...data,
             id: generateId(),
-            projectId: 'proj-1',
-            createdBy: 'user-1',
+            projectId: project?.id || '',
+            createdBy: currentUser?.id || '',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             isActive: false,
@@ -174,6 +198,11 @@ export function WorkflowList() {
           delete (newDef as any)._format;
           addDefinition(newDef);
           toast.success('Template importé', { description: `"${newDef.name}" a été ajouté.` });
+
+          // Persist to backend (non-blocking)
+          workflowApi.createWorkflowDefinition(newDef).catch((err) => {
+            console.warn('[WorkflowList] Failed to persist imported template:', err);
+          });
         } catch {
           toast.error('Erreur de lecture', { description: 'Le fichier JSON est invalide.' });
         }

@@ -3,11 +3,11 @@
 // Dossiers source/cible, auto-start, notifications, etc.
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FolderOpen, FolderInput, FolderOutput, Play, Square,
   Bell, RefreshCw, Clock, Users, Eye, FolderTree, ChevronRight,
-  Check, Search,
+  Check, Search, Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,25 +18,12 @@ import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useWorkflowStore } from '@/stores/workflowStore';
+import { useAuthStore } from '@/stores/authStore';
 import { FolderWatcher } from '@/engine';
+import { getProjectFolders, getSubFolders } from '@/api/trimbleService';
 import { toast } from 'sonner';
 import type { WorkflowSettings } from '@/models/workflow';
-
-/** Simulated project folders (in production, fetched from Trimble Connect API) */
-const DEMO_FOLDERS = [
-  { id: 'folder-root', name: 'Racine du projet', parentId: null, icon: '📁' },
-  { id: 'folder-source', name: '01 - Documents à valider', parentId: 'folder-root', icon: '📂' },
-  { id: 'folder-validated', name: '02 - Documents validés', parentId: 'folder-root', icon: '📂' },
-  { id: 'folder-rejected', name: '03 - Documents rejetés', parentId: 'folder-root', icon: '📂' },
-  { id: 'folder-archi', name: 'Architecture', parentId: 'folder-source', icon: '📐' },
-  { id: 'folder-struct', name: 'Structure', parentId: 'folder-source', icon: '🏗️' },
-  { id: 'folder-cvc', name: 'CVC', parentId: 'folder-source', icon: '❄️' },
-  { id: 'folder-elec', name: 'Électricité', parentId: 'folder-source', icon: '⚡' },
-  { id: 'folder-maquettes', name: 'Maquettes BIM', parentId: 'folder-root', icon: '📦' },
-  { id: 'folder-plans', name: 'Plans 2D', parentId: 'folder-root', icon: '📋' },
-  { id: 'folder-admin', name: 'Administratif', parentId: 'folder-root', icon: '📎' },
-  { id: 'folder-photos', name: 'Photos chantier', parentId: 'folder-root', icon: '📷' },
-];
+import type { ConnectFolder } from '@/models/trimble';
 
 interface WorkflowSettingsPanelProps {
   definitionId: string;
@@ -47,6 +34,31 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
   const definition = definitions.find((d) => d.id === definitionId);
   const [isWatching, setIsWatching] = useState(false);
   const [watcherId, setWatcherId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<ConnectFolder[]>([]);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+
+  // Load real TC folders on mount
+  useEffect(() => {
+    loadFolders();
+  }, []);
+
+  const loadFolders = async () => {
+    const { project, accessToken } = useAuthStore.getState();
+    if (!project?.id || !accessToken) {
+      console.log('[WorkflowSettings] No project/token available, skipping folder load');
+      return;
+    }
+
+    setLoadingFolders(true);
+    try {
+      const data = await getProjectFolders(project.id);
+      setFolders(data);
+    } catch (err) {
+      console.warn('[WorkflowSettings] Failed to load folders:', err);
+    } finally {
+      setLoadingFolders(false);
+    }
+  };
 
   if (!definition) {
     return <div className="p-4 text-muted-foreground">Workflow introuvable</div>;
@@ -82,8 +94,24 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
 
   const getFolderName = (folderId?: string) => {
     if (!folderId) return null;
-    const folder = DEMO_FOLDERS.find((f) => f.id === folderId);
-    return folder ? `${folder.icon} ${folder.name}` : folderId;
+    const folder = folders.find((f) => f.id === folderId);
+    if (folder) return folder.name;
+    // If folder not found in loaded list, show truncated ID
+    return folderId.length > 20 ? `...${folderId.slice(-12)}` : folderId;
+  };
+
+  const handleLoadSubfolders = async (parentId: string) => {
+    try {
+      const subs = await getSubFolders(parentId);
+      // Merge new folders, avoiding duplicates
+      setFolders((prev) => {
+        const existingIds = new Set(prev.map((f) => f.id));
+        const newFolders = subs.filter((f) => !existingIds.has(f.id));
+        return [...prev, ...newFolders];
+      });
+    } catch (err) {
+      console.warn('[WorkflowSettings] Failed to load subfolders:', err);
+    }
   };
 
   return (
@@ -115,6 +143,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             displayValue={getFolderName(settings.sourceFolderId)}
             onChange={(id) => updateSettings({ sourceFolderId: id })}
             color="blue"
+            folders={folders}
+            loading={loadingFolders}
+            onExpandFolder={handleLoadSubfolders}
+            onOpen={loadFolders}
           />
 
           <FolderSelector
@@ -125,6 +157,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             displayValue={getFolderName(settings.targetFolderId)}
             onChange={(id) => updateSettings({ targetFolderId: id })}
             color="green"
+            folders={folders}
+            loading={loadingFolders}
+            onExpandFolder={handleLoadSubfolders}
+            onOpen={loadFolders}
           />
 
           <FolderSelector
@@ -135,6 +171,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             displayValue={getFolderName(settings.rejectedFolderId)}
             onChange={(id) => updateSettings({ rejectedFolderId: id })}
             color="red"
+            folders={folders}
+            loading={loadingFolders}
+            onExpandFolder={handleLoadSubfolders}
+            onOpen={loadFolders}
           />
         </CardContent>
       </Card>
@@ -256,6 +296,10 @@ function FolderSelector({
   displayValue,
   onChange,
   color,
+  folders,
+  loading,
+  onExpandFolder,
+  onOpen,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -264,14 +308,18 @@ function FolderSelector({
   displayValue?: string | null;
   onChange: (id: string) => void;
   color: string;
+  folders: ConnectFolder[];
+  loading?: boolean;
+  onExpandFolder?: (folderId: string) => void;
+  onOpen?: () => void;
 }) {
   const [search, setSearch] = useState('');
 
   const filteredFolders = search
-    ? DEMO_FOLDERS.filter((f) =>
+    ? folders.filter((f) =>
         f.name.toLowerCase().includes(search.toLowerCase())
       )
-    : DEMO_FOLDERS;
+    : folders;
 
   const colorClasses: Record<string, string> = {
     blue: 'border-blue-200 bg-blue-50/50 dark:bg-blue-950/20',
@@ -289,7 +337,7 @@ function FolderSelector({
         </div>
       </div>
 
-      <Popover>
+      <Popover onOpenChange={(open) => { if (open && folders.length === 0) onOpen?.(); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
@@ -319,18 +367,34 @@ function FolderSelector({
           </div>
           <ScrollArea className="h-[200px]">
             <div className="p-1">
+              {loading && (
+                <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Chargement des dossiers...
+                </div>
+              )}
+              {!loading && filteredFolders.length === 0 && (
+                <div className="py-4 text-center text-xs text-muted-foreground space-y-1">
+                  <p>Aucun dossier trouvé</p>
+                  <p className="text-[10px]">
+                    Vérifiez que l'extension est connectée à Trimble Connect, ou saisissez l'ID du dossier manuellement ci-dessous.
+                  </p>
+                </div>
+              )}
               {filteredFolders.map((folder) => (
                 <button
                   key={folder.id}
                   onClick={() => {
                     onChange(folder.id);
                     setSearch('');
+                    // Load subfolders when selecting
+                    onExpandFolder?.(folder.id);
                   }}
                   className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors hover:bg-muted ${
                     value === folder.id ? 'bg-primary/10 font-medium' : ''
                   }`}
                 >
-                  <span>{folder.icon}</span>
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="flex-1 text-left truncate">{folder.name}</span>
                   {value === folder.id && (
                     <Check className="h-3.5 w-3.5 text-primary shrink-0" />

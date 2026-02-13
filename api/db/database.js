@@ -242,6 +242,149 @@ async function insertHistory(h, instanceId) {
   });
 }
 
+// ─── VALIDATION DOCUMENTS ───────────────────────────────────────────────────
+
+export async function getValidationDocuments(projectId) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM validation_documents WHERE project_id = ? ORDER BY uploaded_at DESC',
+    args: [projectId],
+  });
+  return result.rows.map(rowToValidationDocument);
+}
+
+export async function getValidationDocument(id) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM validation_documents WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return null;
+  return rowToValidationDocument(result.rows[0]);
+}
+
+export async function createValidationDocument(doc) {
+  const client = getDatabase();
+  await client.execute({
+    sql: `INSERT INTO validation_documents
+      (id, file_id, file_name, file_extension, file_size, file_path,
+       uploaded_by, uploaded_by_name, uploaded_by_email, uploaded_at, last_modified,
+       version_id, version_number, project_id, workflow_instance_id,
+       status_id, status_name, status_color, status_changed_at, status_changed_by,
+       metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      doc.id, doc.fileId, doc.fileName, doc.fileExtension || '', doc.fileSize || 0, doc.filePath || '',
+      doc.uploadedBy || '', doc.uploadedByName || '', doc.uploadedByEmail || '',
+      doc.uploadedAt || new Date().toISOString(), doc.lastModified || new Date().toISOString(),
+      doc.versionId || null, doc.versionNumber || 1, doc.projectId,
+      doc.workflowInstanceId || null,
+      doc.currentStatus?.id || 'pending', doc.currentStatus?.name || 'En attente',
+      doc.currentStatus?.color || '#6a6e79', doc.currentStatus?.changedAt || null,
+      doc.currentStatus?.changedBy || null,
+      JSON.stringify(doc.metadata || {}),
+    ],
+  });
+  return doc;
+}
+
+export async function updateValidationDocument(id, updates) {
+  const client = getDatabase();
+  const fields = [];
+  const args = [];
+
+  if (updates.fileName !== undefined) { fields.push('file_name = ?'); args.push(updates.fileName); }
+  if (updates.fileSize !== undefined) { fields.push('file_size = ?'); args.push(updates.fileSize); }
+  if (updates.filePath !== undefined) { fields.push('file_path = ?'); args.push(updates.filePath); }
+  if (updates.versionId !== undefined) { fields.push('version_id = ?'); args.push(updates.versionId); }
+  if (updates.versionNumber !== undefined) { fields.push('version_number = ?'); args.push(updates.versionNumber); }
+  if (updates.workflowInstanceId !== undefined) { fields.push('workflow_instance_id = ?'); args.push(updates.workflowInstanceId || null); }
+  if (updates.currentStatus) {
+    fields.push('status_id = ?'); args.push(updates.currentStatus.id);
+    fields.push('status_name = ?'); args.push(updates.currentStatus.name);
+    fields.push('status_color = ?'); args.push(updates.currentStatus.color);
+    fields.push('status_changed_at = ?'); args.push(updates.currentStatus.changedAt || new Date().toISOString());
+    fields.push('status_changed_by = ?'); args.push(updates.currentStatus.changedBy || '');
+  }
+  if (updates.metadata !== undefined) { fields.push('metadata_json = ?'); args.push(JSON.stringify(updates.metadata)); }
+
+  if (fields.length === 0) {
+    return await getValidationDocument(id);
+  }
+
+  fields.push('last_modified = ?');
+  args.push(new Date().toISOString());
+  args.push(id);
+
+  await client.execute({
+    sql: `UPDATE validation_documents SET ${fields.join(', ')} WHERE id = ?`,
+    args,
+  });
+
+  return await getValidationDocument(id);
+}
+
+export async function deleteValidationDocument(id) {
+  const client = getDatabase();
+  await client.execute({ sql: 'DELETE FROM validation_documents WHERE id = ?', args: [id] });
+}
+
+// ─── DOCUMENT COMMENTS ──────────────────────────────────────────────────────
+
+export async function getDocumentComments(documentId) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM document_comments WHERE document_id = ? ORDER BY created_at ASC',
+    args: [documentId],
+  });
+  return result.rows.map(rowToComment);
+}
+
+export async function createDocumentComment(comment) {
+  const client = getDatabase();
+  await client.execute({
+    sql: `INSERT INTO document_comments
+      (id, document_id, author_id, author_name, author_email, content,
+       created_at, parent_id, is_system_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      comment.id, comment.documentId, comment.authorId, comment.authorName,
+      comment.authorEmail || '', comment.content, comment.createdAt || new Date().toISOString(),
+      comment.parentId || null, comment.isSystemMessage ? 1 : 0,
+    ],
+  });
+  return comment;
+}
+
+export async function deleteDocumentComment(id) {
+  const client = getDatabase();
+  await client.execute({ sql: 'DELETE FROM document_comments WHERE id = ?', args: [id] });
+}
+
+// ─── DOCUMENT LABELS ────────────────────────────────────────────────────────
+
+export async function getDocumentLabels(documentId) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM document_labels WHERE document_id = ?',
+    args: [documentId],
+  });
+  return result.rows.map((r) => ({ id: r.label_id, name: r.label_name, color: r.label_color }));
+}
+
+export async function setDocumentLabels(documentId, labels) {
+  const client = getDatabase();
+  // Remove existing labels
+  await client.execute({ sql: 'DELETE FROM document_labels WHERE document_id = ?', args: [documentId] });
+  // Insert new labels
+  for (const label of labels) {
+    await client.execute({
+      sql: 'INSERT INTO document_labels (document_id, label_id, label_name, label_color) VALUES (?, ?, ?, ?)',
+      args: [documentId, label.id, label.name, label.color],
+    });
+  }
+}
+
 // ─── ROW MAPPERS ────────────────────────────────────────────────────────────
 
 function rowToDefinition(row) {
@@ -293,5 +436,49 @@ function rowToHistory(row) {
     userName: row.user_name,
     action: row.action,
     comment: row.comment || undefined,
+  };
+}
+
+function rowToValidationDocument(row) {
+  return {
+    id: row.id,
+    fileId: row.file_id,
+    fileName: row.file_name,
+    fileExtension: row.file_extension || '',
+    fileSize: row.file_size || 0,
+    filePath: row.file_path || '',
+    uploadedBy: row.uploaded_by || '',
+    uploadedByName: row.uploaded_by_name || '',
+    uploadedByEmail: row.uploaded_by_email || '',
+    uploadedAt: row.uploaded_at,
+    lastModified: row.last_modified,
+    versionId: row.version_id || undefined,
+    versionNumber: row.version_number || 1,
+    projectId: row.project_id,
+    workflowInstanceId: row.workflow_instance_id || undefined,
+    currentStatus: {
+      id: row.status_id || 'pending',
+      name: row.status_name || 'En attente',
+      color: row.status_color || '#6a6e79',
+      changedAt: row.status_changed_at || row.uploaded_at,
+      changedBy: row.status_changed_by || '',
+    },
+    metadata: JSON.parse(row.metadata_json || '{}'),
+  };
+}
+
+function rowToComment(row) {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    authorEmail: row.author_email || '',
+    content: row.content,
+    createdAt: row.created_at,
+    parentId: row.parent_id || undefined,
+    isSystemMessage: row.is_system_message === 1,
+    attachments: [],
+    reactions: [],
   };
 }

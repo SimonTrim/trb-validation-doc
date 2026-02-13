@@ -22,6 +22,8 @@ import { useWorkflowStore } from '@/stores/workflowStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useAppStore } from '@/stores/appStore';
 import { usePermissionStore, type UserRole } from '@/stores/permissionStore';
+import { initializeStores } from '@/api/dataLoader';
+import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { WorkflowSettingsPanel } from '@/components/workflow/WorkflowSettingsPanel';
 import { FolderWatcher } from '@/engine';
@@ -381,7 +383,20 @@ export function SettingsView() {
               <CardTitle className="text-base">Actions de maintenance</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="outline" size="sm" className="w-full justify-start gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start gap-2"
+                onClick={async () => {
+                  try {
+                    await initializeStores('production');
+                    toast.success('Données rechargées depuis le serveur');
+                  } catch (err) {
+                    console.error('[Settings] Reload failed:', err);
+                    toast.error('Erreur lors du rechargement des données');
+                  }
+                }}
+              >
                 <RefreshCw className="h-3.5 w-3.5" />
                 Recharger les données depuis le serveur
               </Button>

@@ -408,8 +408,8 @@ const DEMO_WORKFLOW: WorkflowDefinition = {
     { id: 'e-11', source: 'n-commented', target: 'n-review', label: 'Retour', animated: true },
   ],
   settings: {
-    sourceFolderId: 'folder-source',
-    targetFolderId: 'folder-validated',
+    sourceFolderId: undefined,
+    targetFolderId: undefined,
     autoStartOnUpload: true,
     notifyOnStatusChange: true,
     allowResubmission: true,
@@ -470,10 +470,12 @@ export function App() {
     }
 
     function loadDemoData() {
-      useDocumentStore.getState().setDocuments(DEMO_DOCUMENTS);
+      // Documents tab starts EMPTY — only documents deposited for validation appear
+      useDocumentStore.getState().setDocuments([]);
+      // Load a clean workflow template without pre-configured demo folders
       useWorkflowStore.getState().setDefinitions([DEMO_WORKFLOW]);
-      useWorkflowStore.getState().setInstances(DEMO_INSTANCES);
-      console.log('[App] Demo data loaded');
+      useWorkflowStore.getState().setInstances([]);
+      console.log('[App] Demo data loaded (empty documents, ready for production use)');
     }
 
     init();

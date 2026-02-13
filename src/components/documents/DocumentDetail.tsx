@@ -3,11 +3,12 @@
 // Labels, métadonnées, visas, commentaires enrichis avec émojis/PJ/réactions
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   FileText, Download, Clock, User, UserCheck, Calendar,
   FolderOpen, History, Eye, Box, Pen, GitCommit, ArrowUpRight,
 } from 'lucide-react';
+import { getFileDownloadUrl } from '@/api/trimbleService';
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from '@/components/ui/sheet';
@@ -26,7 +27,10 @@ import { VersionCompare } from './VersionCompare';
 import { AuditTrail } from './AuditTrail';
 import { DocumentPrintView } from './DocumentPrintView';
 import { useDocumentStore } from '@/stores/documentStore';
+import { useAuthStore } from '@/stores/authStore';
 import { openInViewer, openForAnnotation, canOpenInViewer, getViewerType } from '@/lib/viewerIntegration';
+import { createDocumentComment } from '@/api/documentApiService';
+import { updateValidationDocument, updateDocumentLabels } from '@/api/documentApiService';
 import { formatDate, formatDateTime, formatFileSize, generateId } from '@/lib/utils';
 import type { CommentAttachment, CommentReaction, DocumentComment, DocumentVersion } from '@/models/document';
 
@@ -41,15 +45,41 @@ export function DocumentDetail() {
     setSelectedDocument(null);
   };
 
+  // ── Téléchargement ──────────────────────────────────────────────────
+
+  const handleDownload = useCallback(async () => {
+    if (!doc.fileId) return;
+    try {
+      const { url } = await getFileDownloadUrl(doc.fileId);
+      if (url) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = doc.fileName;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (err) {
+      console.error('[DocumentDetail] Download failed:', err);
+    }
+  }, [doc.fileId, doc.fileName]);
+
   // ── Commentaires ────────────────────────────────────────────────────
 
   const handleSendComment = (content: string, attachments: CommentAttachment[]) => {
+    const { currentUser } = useAuthStore.getState();
+    const authorId = currentUser?.id || 'unknown';
+    const authorName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Utilisateur';
+    const authorEmail = currentUser?.email || '';
+
     const newComment: DocumentComment = {
       id: generateId(),
       documentId: doc.id,
-      authorId: 'user-1',
-      authorName: 'Utilisateur courant',
-      authorEmail: 'user@example.com',
+      authorId,
+      authorName,
+      authorEmail,
       content,
       createdAt: new Date().toISOString(),
       isSystemMessage: false,
@@ -60,15 +90,25 @@ export function DocumentDetail() {
     updateDocument(doc.id, {
       comments: [...doc.comments, newComment],
     });
+
+    // Persist to backend (non-blocking)
+    createDocumentComment(doc.id, newComment).catch((err) => {
+      console.warn('[DocumentDetail] Failed to persist comment:', err);
+    });
   };
 
   const handleReplyComment = (parentId: string, content: string) => {
+    const { currentUser } = useAuthStore.getState();
+    const authorId = currentUser?.id || 'unknown';
+    const authorName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Utilisateur';
+    const authorEmail = currentUser?.email || '';
+
     const reply: DocumentComment = {
       id: generateId(),
       documentId: doc.id,
-      authorId: 'user-1',
-      authorName: 'Utilisateur courant',
-      authorEmail: 'user@example.com',
+      authorId,
+      authorName,
+      authorEmail,
       content,
       createdAt: new Date().toISOString(),
       parentId,
@@ -79,6 +119,11 @@ export function DocumentDetail() {
 
     updateDocument(doc.id, {
       comments: [...doc.comments, reply],
+    });
+
+    // Persist to backend (non-blocking)
+    createDocumentComment(doc.id, reply).catch((err) => {
+      console.warn('[DocumentDetail] Failed to persist reply:', err);
     });
   };
 
@@ -95,8 +140,9 @@ export function DocumentDetail() {
   // ── Réactions ─────────────────────────────────────────────────────────
 
   const handleReaction = (commentId: string, emoji: string) => {
-    const currentUserId = 'user-1';
-    const currentUserName = 'Utilisateur courant';
+    const { currentUser } = useAuthStore.getState();
+    const currentUserId = currentUser?.id || 'unknown';
+    const currentUserName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Utilisateur';
 
     const updatedComments = doc.comments.map((c) => {
       if (c.id !== commentId) return c;
@@ -164,7 +210,7 @@ export function DocumentDetail() {
               color={doc.currentStatus.color}
               pulse={!['approved', 'rejected', 'refused', 'vso'].includes(doc.currentStatus.id)}
             />
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="mr-1.5 h-3.5 w-3.5" />
               Télécharger
             </Button>
@@ -301,8 +347,11 @@ export function DocumentDetail() {
                       size="md"
                       removable
                       onRemove={(labelId) => {
-                        updateDocument(doc.id, {
-                          labels: (doc.labels || []).filter((l) => l.id !== labelId),
+                        const newLabels = (doc.labels || []).filter((l) => l.id !== labelId);
+                        updateDocument(doc.id, { labels: newLabels });
+                        // Persist to backend (non-blocking)
+                        updateDocumentLabels(doc.id, newLabels).catch((err) => {
+                          console.warn('[DocumentDetail] Failed to persist label removal:', err);
                         });
                       }}
                     />

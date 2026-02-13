@@ -18,7 +18,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useDocumentStore } from '@/stores/documentStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useWorkflowEngine } from '@/hooks/useWorkflowEngine';
+import { updateValidationDocument } from '@/api/documentApiService';
 import { formatFileSize } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { ValidationDocument } from '@/models/document';
@@ -52,17 +54,21 @@ export function ResubmitDialog({ document: doc, trigger }: ResubmitDialogProps) 
   const handleResubmit = async () => {
     setIsSubmitting(true);
     try {
+      const { currentUser } = useAuthStore.getState();
+      const userName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : doc.uploadedByName;
+
       // 1. Update the document with new version info
       const now = new Date().toISOString();
+      const newVersionNumber = doc.versionNumber + 1;
       const updates: Partial<ValidationDocument> = {
-        versionNumber: doc.versionNumber + 1,
+        versionNumber: newVersionNumber,
         lastModified: now,
         currentStatus: {
           id: 'pending',
           name: 'En attente',
           color: '#6a6e79',
           changedAt: now,
-          changedBy: doc.uploadedByName,
+          changedBy: userName,
         },
         // Reset reviewers decisions
         reviewers: doc.reviewers.map((r) => ({
@@ -79,7 +85,7 @@ export function ResubmitDialog({ document: doc, trigger }: ResubmitDialogProps) 
             authorId: 'system',
             authorName: 'Système',
             authorEmail: '',
-            content: `Nouvelle version (v${doc.versionNumber + 1}) soumise par ${doc.uploadedByName}.${comment ? `\nCommentaire : ${comment}` : ''}${selectedFile ? `\nFichier : ${selectedFile.name} (${formatFileSize(selectedFile.size)})` : ''}`,
+            content: `Nouvelle version (v${newVersionNumber}) soumise par ${userName}.${comment ? `\nCommentaire : ${comment}` : ''}${selectedFile ? `\nFichier : ${selectedFile.name} (${formatFileSize(selectedFile.size)})` : ''}`,
             createdAt: now,
             isSystemMessage: true,
             attachments: [],
@@ -97,10 +103,20 @@ export function ResubmitDialog({ document: doc, trigger }: ResubmitDialogProps) 
 
       updateDocument(doc.id, updates);
 
-      // 2. Clear the old workflow instance and start a new one
+      // 2. Persist to backend (non-blocking)
+      updateValidationDocument(doc.id, {
+        versionNumber: newVersionNumber,
+        currentStatus: updates.currentStatus,
+        fileName: updates.fileName,
+        fileSize: updates.fileSize,
+      }).catch((err) => {
+        console.warn('[ResubmitDialog] Failed to persist resubmission:', err);
+      });
+
+      // 3. Clear the old workflow instance and start a new one
       updateDocument(doc.id, { workflowInstanceId: undefined });
 
-      // 3. Start a new workflow
+      // 4. Start a new workflow
       try {
         await startWorkflow(doc.id);
       } catch {
@@ -108,7 +124,7 @@ export function ResubmitDialog({ document: doc, trigger }: ResubmitDialogProps) 
       }
 
       toast.success('Document re-soumis avec succès', {
-        description: `Version ${doc.versionNumber + 1} — Le workflow de validation a été relancé.`,
+        description: `Version ${newVersionNumber} — Le workflow de validation a été relancé.`,
       });
 
       setOpen(false);

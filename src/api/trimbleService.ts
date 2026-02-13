@@ -28,6 +28,46 @@ export async function getFolderItems(folderId: string): Promise<(ConnectFile | C
   return withRetry(() => apiRequest<(ConnectFile | ConnectFolder)[]>(`/folders/${folderId}/items`));
 }
 
+/** Lister les dossiers d'un projet (racine + premier niveau) */
+export async function getProjectFolders(projectId: string): Promise<ConnectFolder[]> {
+  return withRetry(() => apiRequest<ConnectFolder[]>(`/projects/${projectId}/folders`));
+}
+
+/** Lister les sous-dossiers d'un dossier */
+export async function getSubFolders(folderId: string): Promise<ConnectFolder[]> {
+  return withRetry(() => apiRequest<ConnectFolder[]>(`/folders/${folderId}/subfolders`));
+}
+
+/** Uploader un fichier dans un dossier TC (via le backend) */
+export async function uploadFile(
+  projectId: string,
+  folderId: string,
+  file: File
+): Promise<ConnectFile> {
+  // Convert file to base64 for JSON transport through the proxy
+  const fileBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove data URL prefix (e.g., "data:application/pdf;base64,")
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  return apiRequest<ConnectFile>(`/projects/${projectId}/files`, {
+    method: 'POST',
+    body: {
+      fileName: file.name,
+      folderId,
+      fileBase64,
+      mimeType: file.type || 'application/octet-stream',
+    },
+  });
+}
+
 /** Copier un fichier vers un autre dossier (via le backend) */
 export async function copyFile(fileId: string, targetFolderId: string): Promise<ConnectFile> {
   return apiRequest<ConnectFile>('/files/copy', {

@@ -43,6 +43,7 @@ import { useDocumentStore } from '@/stores/documentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { generateId } from '@/lib/utils';
+import * as workflowApi from '@/api/workflowApiService';
 import type { WorkflowNodeType, WorkflowNodeData, WorkflowInstance } from '@/models/workflow';
 
 /** Snapshot of the designer state for undo/redo */
@@ -339,7 +340,7 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
     []
   );
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     // Sync React Flow state back to store
     const workflowNodes = nodes.map((n) => ({
       id: n.id,
@@ -359,8 +360,26 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
 
     setDesignerNodes(workflowNodes);
     setDesignerEdges(workflowEdges);
+
+    // Persist to backend
+    if (activeDefinition) {
+      const updates = {
+        nodes: workflowNodes,
+        edges: workflowEdges,
+        statuses: useWorkflowStore.getState().designerStatuses || activeDefinition.statuses,
+        settings: activeDefinition.settings,
+      };
+      updateDefinition(activeDefinition.id, updates);
+      workflowApi.updateWorkflowDefinition(activeDefinition.id, updates).then(() => {
+        toast.success('Workflow enregistré');
+      }).catch((err) => {
+        console.warn('[WorkflowDesigner] Failed to persist save:', err);
+        toast.error('Erreur de sauvegarde', { description: 'Le workflow a été sauvé localement mais pas sur le serveur.' });
+      });
+    }
+
     onSave?.();
-  }, [nodes, edges, setDesignerNodes, setDesignerEdges, onSave]);
+  }, [nodes, edges, setDesignerNodes, setDesignerEdges, onSave, activeDefinition, updateDefinition]);
 
   const handleCancel = useCallback(() => {
     // Reset designer to original definition state

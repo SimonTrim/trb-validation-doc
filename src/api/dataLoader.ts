@@ -7,8 +7,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useAppStore } from '@/stores/appStore';
-import { getProjectFiles, getProjectUsers, getFolderItems } from './trimbleService';
+import { getProjectUsers, getFolderItems } from './trimbleService';
 import { getWorkflowDefinitions, getWorkflowInstances } from './workflowApiService';
+import { getValidationDocuments } from './documentApiService';
 import type { ConnectFile, ConnectUser } from '@/models/trimble';
 import type { ValidationDocument, DocumentLabel, DocumentComment } from '@/models/document';
 import type { WorkflowDefinition, WorkflowInstance } from '@/models/workflow';
@@ -77,7 +78,7 @@ export function mapConnectFileToDocument(
 
 // ─── Data loading ───────────────────────────────────────────────────────────
 
-/** Charge les données depuis le backend + Trimble Connect */
+/** Charge les données depuis le backend Turso + Trimble Connect */
 export async function loadProductionData(): Promise<{
   documents: ValidationDocument[];
   definitions: WorkflowDefinition[];
@@ -91,22 +92,22 @@ export async function loadProductionData(): Promise<{
 
   const projectId = project.id;
 
-  // Charger en parallèle : fichiers, utilisateurs, workflows
-  const [files, users, definitions, instances] = await Promise.allSettled([
-    getProjectFiles(projectId),
+  // Charger en parallèle : documents validation (Turso), utilisateurs (TC), workflows (Turso)
+  const [docs, users, definitions, instances] = await Promise.allSettled([
+    getValidationDocuments(projectId),
     getProjectUsers(projectId),
     getWorkflowDefinitions(projectId),
     getWorkflowInstances(projectId),
   ]);
 
-  const resolvedFiles = files.status === 'fulfilled' ? files.value : [];
+  const resolvedDocs = docs.status === 'fulfilled' ? docs.value : [];
   const resolvedUsers = users.status === 'fulfilled' ? users.value : [];
   const resolvedDefs = definitions.status === 'fulfilled' ? definitions.value : [];
   const resolvedInstances = instances.status === 'fulfilled' ? instances.value : [];
 
   // Log errors without blocking
-  if (files.status === 'rejected') {
-    console.warn('[DataLoader] Failed to load files:', files.reason);
+  if (docs.status === 'rejected') {
+    console.warn('[DataLoader] Failed to load validation documents:', docs.reason);
   }
   if (users.status === 'rejected') {
     console.warn('[DataLoader] Failed to load users:', users.reason);
@@ -115,8 +116,23 @@ export async function loadProductionData(): Promise<{
     console.warn('[DataLoader] Failed to load workflow definitions:', definitions.reason);
   }
 
-  // Mapper les fichiers TC en documents de validation
-  const documents = resolvedFiles.map((f) => mapConnectFileToDocument(f, projectId, resolvedUsers));
+  // Normaliser les documents depuis Turso (ajout des champs manquants)
+  const documents: ValidationDocument[] = resolvedDocs.map((doc) => ({
+    ...doc,
+    reviewers: doc.reviewers || [],
+    comments: doc.comments || [],
+    labels: doc.labels || [],
+    versionHistory: doc.versionHistory || [{
+      versionNumber: doc.versionNumber || 1,
+      versionId: doc.versionId || doc.fileId,
+      fileName: doc.fileName,
+      fileSize: doc.fileSize || 0,
+      uploadedBy: doc.uploadedBy || 'unknown',
+      uploadedByName: doc.uploadedByName || 'Inconnu',
+      uploadedAt: doc.uploadedAt,
+    }],
+    metadata: doc.metadata || {},
+  }));
 
   // Enrichir les documents avec les données des instances de workflow
   for (const inst of resolvedInstances) {

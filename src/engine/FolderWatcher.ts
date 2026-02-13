@@ -4,6 +4,7 @@
 // ============================================================================
 
 import * as trimbleService from '@/api/trimbleService';
+import { createValidationDocument } from '@/api/documentApiService';
 import { WorkflowEngine } from './WorkflowEngine';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useDocumentStore } from '@/stores/documentStore';
@@ -275,6 +276,11 @@ class FolderWatcherClass {
 
     // Ajouter au store
     useDocumentStore.getState().addDocument(document);
+
+    // Persist to backend (non-blocking)
+    createValidationDocument(document).catch((err) => {
+      console.warn('[FolderWatcher] Failed to persist document to backend:', err);
+    });
 
     // Notifier
     useAppStore.getState().addNotification({
