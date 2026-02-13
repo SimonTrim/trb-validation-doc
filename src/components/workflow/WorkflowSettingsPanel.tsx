@@ -21,6 +21,7 @@ import { useWorkflowStore } from '@/stores/workflowStore';
 import { useAuthStore } from '@/stores/authStore';
 import { FolderWatcher } from '@/engine';
 import { getProjectFolders, getSubFolders } from '@/api/trimbleService';
+import * as workflowApi from '@/api/workflowApiService';
 import { toast } from 'sonner';
 import type { WorkflowSettings } from '@/models/workflow';
 import type { ConnectFolder } from '@/models/trimble';
@@ -37,6 +38,7 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
   const [folders, setFolders] = useState<ConnectFolder[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [scanningFolder, setScanningFolder] = useState(false);
 
   // Load real TC folders on mount, retry when auth becomes available
   useEffect(() => {
@@ -100,9 +102,21 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
   const settings = definition.settings;
 
   const updateSettings = (updates: Partial<WorkflowSettings>) => {
-    updateDefinition(definitionId, {
-      settings: { ...settings, ...updates },
-    });
+    const newSettings = { ...settings, ...updates };
+    updateDefinition(definitionId, { settings: newSettings });
+
+    // Persist to backend (non-blocking)
+    if (definition) {
+      const fullDef = {
+        ...definition,
+        settings: newSettings,
+        projectId: definition.projectId || useAuthStore.getState().project?.id || '',
+        createdBy: definition.createdBy || useAuthStore.getState().currentUser?.id || '',
+      };
+      workflowApi.updateWorkflowDefinition(definitionId, fullDef).catch((err) => {
+        console.warn('[WorkflowSettings] Failed to persist settings:', err);
+      });
+    }
   };
 
   const handleToggleWatcher = () => {
@@ -144,6 +158,87 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
       });
     } catch (err) {
       console.warn('[WorkflowSettings] Failed to load subfolders:', err);
+    }
+  };
+
+  /** Scan the source folder for existing files and import them as validation documents */
+  const handleScanSourceFolder = async () => {
+    if (!settings.sourceFolderId) return;
+    setScanningFolder(true);
+    try {
+      const { getFolderItems } = await import('@/api/trimbleService');
+      const { createValidationDocument } = await import('@/api/documentApiService');
+      const { useDocumentStore } = await import('@/stores/documentStore');
+      const { generateId } = await import('@/lib/utils');
+
+      const items = await getFolderItems(settings.sourceFolderId);
+      // Filter to files only (items with size or extension)
+      const files = items.filter((item: any) => item.size || item.extension || item.fileSize);
+      const existingDocs = useDocumentStore.getState().documents;
+      const existingFileIds = new Set(existingDocs.map((d) => d.fileId));
+
+      let imported = 0;
+      for (const file of files) {
+        if (existingFileIds.has(file.id)) continue; // Skip already imported
+
+        const authState = useAuthStore.getState();
+        const doc = {
+          id: generateId(),
+          fileId: file.id,
+          fileName: file.name,
+          fileExtension: (file as any).extension || '',
+          fileSize: (file as any).size || 0,
+          filePath: (file as any).path || '',
+          uploadedBy: (file as any).uploadedBy || authState.currentUser?.id || '',
+          uploadedByName: (file as any).uploadedBy || authState.currentUser?.firstName || 'Utilisateur',
+          uploadedByEmail: authState.currentUser?.email || '',
+          uploadedAt: (file as any).uploadedAt || new Date().toISOString(),
+          lastModified: (file as any).lastModified || new Date().toISOString(),
+          versionNumber: 1,
+          projectId: authState.project?.id || '',
+          currentStatus: {
+            id: 'pending',
+            name: 'En attente',
+            color: '#6a6e79',
+            changedAt: new Date().toISOString(),
+            changedBy: 'Système',
+          },
+          reviewers: [],
+          labels: [],
+          versionHistory: [{
+            versionNumber: 1,
+            versionId: file.id,
+            fileName: file.name,
+            fileSize: (file as any).size || 0,
+            uploadedBy: authState.currentUser?.id || 'system',
+            uploadedByName: authState.currentUser?.firstName || 'Système',
+            uploadedAt: new Date().toISOString(),
+          }],
+          comments: [],
+          metadata: {},
+        };
+
+        useDocumentStore.getState().addDocument(doc as any);
+        createValidationDocument(doc as any).catch((err) => {
+          console.warn('[WorkflowSettings] Failed to persist scanned doc:', err);
+        });
+        imported++;
+      }
+
+      if (imported > 0) {
+        toast.success(`${imported} document(s) importé(s)`, {
+          description: 'Les fichiers du dossier source ont été ajoutés à la validation.',
+        });
+      } else if (files.length === 0) {
+        toast.info('Aucun fichier trouvé dans le dossier source');
+      } else {
+        toast.info('Tous les fichiers sont déjà importés');
+      }
+    } catch (err: any) {
+      console.error('[WorkflowSettings] Scan failed:', err);
+      toast.error('Erreur lors du scan', { description: err?.message || String(err) });
+    } finally {
+      setScanningFolder(false);
     }
   };
 
@@ -318,6 +413,33 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             <p className="text-xs text-destructive">
               Configurez d'abord un dossier source pour activer la surveillance.
             </p>
+          )}
+
+          {settings.sourceFolderId && (
+            <Separator />
+          )}
+
+          {settings.sourceFolderId && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Scanner le dossier source</p>
+                <p className="text-xs text-muted-foreground">
+                  Importe les fichiers déjà présents dans le dossier source comme documents à valider
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleScanSourceFolder()}
+                disabled={scanningFolder}
+              >
+                {scanningFolder ? (
+                  <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Scan...</>
+                ) : (
+                  <><Search className="mr-1.5 h-3 w-3" /> Scanner</>
+                )}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

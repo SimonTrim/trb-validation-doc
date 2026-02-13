@@ -41,6 +41,7 @@ import { MetadataSchemaEditor } from './MetadataSchemaEditor';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { generateId } from '@/lib/utils';
 import * as workflowApi from '@/api/workflowApiService';
@@ -370,8 +371,23 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
         settings: activeDefinition.settings,
       };
       updateDefinition(activeDefinition.id, updates);
-      workflowApi.updateWorkflowDefinition(activeDefinition.id, updates).then(() => {
+
+      // Send the FULL definition (needed for upsert if it doesn't exist in DB yet)
+      const fullDefinition = {
+        ...activeDefinition,
+        ...updates,
+        projectId: activeDefinition.projectId || useAuthStore.getState().project?.id || '',
+        createdBy: activeDefinition.createdBy || useAuthStore.getState().currentUser?.id || '',
+      };
+      workflowApi.updateWorkflowDefinition(activeDefinition.id, fullDefinition).then(() => {
         toast.success('Workflow enregistré');
+        // Restart folder watcher if settings changed
+        if (fullDefinition.isActive && fullDefinition.settings?.autoStartOnUpload && fullDefinition.settings?.sourceFolderId) {
+          import('@/engine').then(({ FolderWatcher }) => {
+            FolderWatcher.stopAll();
+            FolderWatcher.startForActiveWorkflows();
+          });
+        }
       }).catch((err) => {
         console.warn('[WorkflowDesigner] Failed to persist save:', err);
         toast.error('Erreur de sauvegarde', { description: 'Le workflow a été sauvé localement mais pas sur le serveur.' });

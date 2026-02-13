@@ -704,20 +704,42 @@ app.post('/api/workflows', requireAuth, async (req, res) => {
   }
 });
 
-// Update workflow definition
+// Update workflow definition (upsert: create if not found)
 app.put('/api/workflows/:id', requireAuth, async (req, res) => {
   try {
     if (await ensureDb()) {
-      const updated = await db.updateWorkflowDefinition(req.params.id, req.body);
-      return res.json(updated);
+      try {
+        const updated = await db.updateWorkflowDefinition(req.params.id, req.body);
+        return res.json(updated);
+      } catch (err) {
+        if (err.message === 'Not found') {
+          // Workflow doesn't exist yet in DB — create it (upsert)
+          console.log(`[Workflows] Workflow ${req.params.id} not found, creating (upsert)`);
+          const workflow = {
+            ...req.body,
+            id: req.params.id,
+            createdAt: req.body.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          await db.createWorkflowDefinition(workflow);
+          return res.json(workflow);
+        }
+        throw err;
+      }
     }
     const existing = workflowStore.get(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Workflow not found' });
+    if (!existing) {
+      // In-memory fallback: also upsert
+      const workflow = { ...req.body, id: req.params.id, updatedAt: new Date().toISOString() };
+      workflowStore.set(req.params.id, workflow);
+      return res.json(workflow);
+    }
     const updated = { ...existing, ...req.body, updatedAt: new Date().toISOString() };
     workflowStore.set(req.params.id, updated);
     res.json(updated);
   } catch (error) {
-    res.status(error.message === 'Not found' ? 404 : 500).json({ error: error.message });
+    console.error('[Workflows] PUT error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
