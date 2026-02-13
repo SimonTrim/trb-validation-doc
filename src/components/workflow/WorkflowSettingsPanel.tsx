@@ -36,25 +36,58 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
   const [watcherId, setWatcherId] = useState<string | null>(null);
   const [folders, setFolders] = useState<ConnectFolder[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
 
-  // Load real TC folders on mount
+  // Load real TC folders on mount, retry when auth becomes available
   useEffect(() => {
     loadFolders();
+    // Also listen for auth state changes to retry
+    const unsub = useAuthStore.subscribe((state, prevState) => {
+      if (state.accessToken && !prevState.accessToken) {
+        console.log('[WorkflowSettings] Token became available, loading folders...');
+        loadFolders();
+      }
+    });
+    return () => unsub();
   }, []);
 
   const loadFolders = async () => {
-    const { project, accessToken } = useAuthStore.getState();
-    if (!project?.id || !accessToken) {
-      console.log('[WorkflowSettings] No project/token available, skipping folder load');
+    const { project, accessToken, isConnected } = useAuthStore.getState();
+    console.log('[WorkflowSettings] loadFolders called — project:', project?.id, 'rootId:', project?.rootId, 'token:', accessToken ? `${accessToken.length} chars` : 'null', 'connected:', isConnected);
+
+    if (!project?.id) {
+      setFolderError('Projet non détecté. Rechargez l\'extension dans Trimble Connect.');
       return;
+    }
+    if (!accessToken) {
+      setFolderError('Token d\'accès non disponible. L\'extension tente de se reconnecter...');
+      // Try to refresh the token
+      try {
+        const { refreshAccessToken } = await import('@/api/workspaceApi');
+        const newToken = await refreshAccessToken();
+        if (!newToken) {
+          setFolderError('Impossible d\'obtenir un token. Rechargez la page Trimble Connect.');
+          return;
+        }
+      } catch {
+        setFolderError('Impossible d\'obtenir un token. Rechargez la page Trimble Connect.');
+        return;
+      }
     }
 
     setLoadingFolders(true);
+    setFolderError(null);
     try {
       const data = await getProjectFolders(project.id);
+      console.log('[WorkflowSettings] Folders loaded:', data.length, 'folders');
       setFolders(data);
-    } catch (err) {
-      console.warn('[WorkflowSettings] Failed to load folders:', err);
+      if (data.length === 0) {
+        setFolderError('Le projet ne contient aucun dossier, ou l\'API a retourné une liste vide.');
+      }
+    } catch (err: any) {
+      const msg = err?.body || err?.message || String(err);
+      console.error('[WorkflowSettings] Failed to load folders:', msg, err);
+      setFolderError(`Erreur: ${msg}`);
     } finally {
       setLoadingFolders(false);
     }
@@ -145,8 +178,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             color="blue"
             folders={folders}
             loading={loadingFolders}
+            error={folderError}
             onExpandFolder={handleLoadSubfolders}
             onOpen={loadFolders}
+            onRetry={loadFolders}
           />
 
           <FolderSelector
@@ -159,8 +194,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             color="green"
             folders={folders}
             loading={loadingFolders}
+            error={folderError}
             onExpandFolder={handleLoadSubfolders}
             onOpen={loadFolders}
+            onRetry={loadFolders}
           />
 
           <FolderSelector
@@ -173,8 +210,10 @@ export function WorkflowSettingsPanel({ definitionId }: WorkflowSettingsPanelPro
             color="red"
             folders={folders}
             loading={loadingFolders}
+            error={folderError}
             onExpandFolder={handleLoadSubfolders}
             onOpen={loadFolders}
+            onRetry={loadFolders}
           />
         </CardContent>
       </Card>
@@ -298,8 +337,10 @@ function FolderSelector({
   color,
   folders,
   loading,
+  error,
   onExpandFolder,
   onOpen,
+  onRetry,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -310,8 +351,10 @@ function FolderSelector({
   color: string;
   folders: ConnectFolder[];
   loading?: boolean;
+  error?: string | null;
   onExpandFolder?: (folderId: string) => void;
   onOpen?: () => void;
+  onRetry?: () => void;
 }) {
   const [search, setSearch] = useState('');
 
@@ -337,7 +380,7 @@ function FolderSelector({
         </div>
       </div>
 
-      <Popover onOpenChange={(open) => { if (open && folders.length === 0) onOpen?.(); }}>
+      <Popover onOpenChange={(open) => { if (open) onOpen?.(); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
@@ -353,7 +396,7 @@ function FolderSelector({
             <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-72 p-0" align="start">
+        <PopoverContent className="w-80 p-0" align="start">
           <div className="p-2 border-b">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -373,12 +416,28 @@ function FolderSelector({
                   Chargement des dossiers...
                 </div>
               )}
-              {!loading && filteredFolders.length === 0 && (
-                <div className="py-4 text-center text-xs text-muted-foreground space-y-1">
+              {!loading && error && (
+                <div className="py-3 px-2 text-center text-xs space-y-2">
+                  <p className="text-destructive font-medium">Connexion échouée</p>
+                  <p className="text-[10px] text-muted-foreground break-words">{error}</p>
+                  {onRetry && (
+                    <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={onRetry}>
+                      <RefreshCw className="mr-1 h-3 w-3" /> Réessayer
+                    </Button>
+                  )}
+                </div>
+              )}
+              {!loading && !error && filteredFolders.length === 0 && (
+                <div className="py-4 text-center text-xs text-muted-foreground space-y-2">
                   <p>Aucun dossier trouvé</p>
                   <p className="text-[10px]">
-                    Vérifiez que l'extension est connectée à Trimble Connect, ou saisissez l'ID du dossier manuellement ci-dessous.
+                    Le projet semble vide. Créez des dossiers dans Trimble Connect puis réessayez.
                   </p>
+                  {onRetry && (
+                    <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={onRetry}>
+                      <RefreshCw className="mr-1 h-3 w-3" /> Recharger
+                    </Button>
+                  )}
                 </div>
               )}
               {filteredFolders.map((folder) => (

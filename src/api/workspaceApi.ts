@@ -72,16 +72,20 @@ export async function initWorkspaceApi(): Promise<boolean> {
 
     // Get project info
     const project = await workspaceApi.project.getCurrentProject();
+    console.log('[WorkspaceAPI] Project raw data:', JSON.stringify(project));
+    const rootId = project.rootId || project.rootFolderId || project.root_id || '';
     store.setProject({
       id: project.id,
       name: project.name,
       location: project.location,
-      rootId: project.rootId,
+      rootId,
     });
+    console.log('[WorkspaceAPI] Project stored:', { id: project.id, name: project.name, rootId, location: project.location });
     store.setRegion(getRegionCode(project.location));
 
     // Request access token
     const token = await workspaceApi.extension.requestPermission('accesstoken');
+    console.log('[WorkspaceAPI] Token response type:', typeof token, 'value:', token === 'pending' ? 'pending' : token === 'denied' ? 'denied' : `Bearer (${String(token).length} chars)`);
     if (token !== 'pending' && token !== 'denied') {
       store.setAccessToken(token);
       store.setConnected(true);
@@ -163,4 +167,21 @@ function handleEvent(event: string, data: any) {
 /** Obtient le Workspace API (ou null si non connecté) */
 export function getWorkspaceApi() {
   return workspaceApi;
+}
+
+/** Demande un nouveau token d'accès au Workspace API */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (!workspaceApi) return null;
+  try {
+    const token = await workspaceApi.extension.requestPermission('accesstoken');
+    if (token && token !== 'pending' && token !== 'denied') {
+      const store = useAuthStore.getState();
+      store.setAccessToken(token);
+      console.log('[WorkspaceAPI] Token refreshed, length:', token.length);
+      return token;
+    }
+  } catch (err) {
+    console.warn('[WorkspaceAPI] Token refresh failed:', err);
+  }
+  return null;
 }

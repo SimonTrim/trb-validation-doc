@@ -59,6 +59,7 @@ function requireAuth(req, res, next) {
 /** Proxy fetch to Trimble Connect API */
 async function tcFetch(req, endpoint, options = {}) {
   const url = `${req.baseUrl}${endpoint}`;
+  console.log(`[tcFetch] ${options.method || 'GET'} ${url}`);
   const response = await fetch(url, {
     method: options.method || 'GET',
     headers: {
@@ -71,7 +72,8 @@ async function tcFetch(req, endpoint, options = {}) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw { status: response.status, message: text };
+    console.error(`[tcFetch] Error ${response.status} for ${url}:`, text.substring(0, 300));
+    throw { status: response.status, message: `TC API ${response.status}: ${text.substring(0, 200)}` };
   }
 
   if (response.status === 204) return null;
@@ -129,8 +131,10 @@ app.get('/api/projects/:projectId/files', requireAuth, async (req, res) => {
 // Folder contents
 app.get('/api/folders/:folderId/items', requireAuth, async (req, res) => {
   try {
+    console.log(`[FolderItems] GET /folders/${req.params.folderId}/items — region: ${req.region}`);
     const raw = await tcFetch(req, `/folders/${req.params.folderId}/items`);
     const items = Array.isArray(raw) ? raw : (raw?.items || []);
+    console.log(`[FolderItems] Folder ${req.params.folderId}: ${items.length} items, types:`, items.map(i => `${i.name}(${i.type})`).slice(0, 10));
     // Map files, pass through folders
     const mapped = items.map((item) => {
       if (item.type === 'FILE' || item.size !== undefined) {
@@ -428,15 +432,20 @@ async function ensureDb() {
 // Get project root folder ID then list its contents
 app.get('/api/projects/:projectId/folders', requireAuth, async (req, res) => {
   try {
+    console.log(`[Folders] GET /projects/${req.params.projectId}/folders — region: ${req.region}`);
     // TC API: GET /projects/{projectId} returns project info with rootFolderId
     const project = await tcFetch(req, `/projects/${req.params.projectId}`);
-    const rootFolderId = project.rootId || project.rootFolderId;
+    console.log('[Folders] Project response keys:', Object.keys(project || {}));
+    const rootFolderId = project.rootId || project.rootFolderId || project.root_id;
+    console.log('[Folders] rootFolderId:', rootFolderId);
     if (!rootFolderId) {
+      console.warn('[Folders] No rootFolderId found in project data:', JSON.stringify(project).substring(0, 500));
       return res.json([]);
     }
     // Get root folder contents (folders only)
     const raw = await tcFetch(req, `/folders/${rootFolderId}/items`);
     const items = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
+    console.log(`[Folders] Root folder items: ${items.length} total, types:`, items.map(i => `${i.name}(${i.type})`).slice(0, 10));
     // TC items can have type 'FOLDER' or be identified by lack of size/extension
     const folders = items
       .filter((item) => {
@@ -447,8 +456,10 @@ app.get('/api/projects/:projectId/folders', requireAuth, async (req, res) => {
       .map((f) => ({ id: f.id, name: f.name, parentId: f.parentId || rootFolderId }));
     // Prepend root
     const rootName = project.name || 'Racine du projet';
+    console.log(`[Folders] Returning ${folders.length + 1} folders (including root)`);
     res.json([{ id: rootFolderId, name: rootName, parentId: null }, ...folders]);
   } catch (error) {
+    console.error('[Folders] Error:', error);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
@@ -456,6 +467,7 @@ app.get('/api/projects/:projectId/folders', requireAuth, async (req, res) => {
 // Get subfolders of a specific folder
 app.get('/api/folders/:folderId/subfolders', requireAuth, async (req, res) => {
   try {
+    console.log(`[Subfolders] GET /folders/${req.params.folderId}/subfolders — region: ${req.region}`);
     const raw = await tcFetch(req, `/folders/${req.params.folderId}/items`);
     const items = Array.isArray(raw) ? raw : (raw?.items || raw?.data || []);
     const folders = items

@@ -12,22 +12,16 @@ interface RequestOptions {
   headers?: Record<string, string>;
 }
 
-/** Client API avec gestion automatique du token et de la région */
-export async function apiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { accessToken, region } = useAuthStore.getState();
+/** Execute a single fetch with given token */
+async function doFetch<T>(endpoint: string, options: RequestOptions, token: string, region: string): Promise<T> {
   const { method = 'GET', body, headers = {} } = options;
-
-  if (!accessToken) {
-    throw new Error('No access token available');
-  }
-
   const url = `${BACKEND_URL}${endpoint}`;
 
   const response = await fetch(url, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${token}`,
       'X-Project-Region': region,
       ...headers,
     },
@@ -41,6 +35,36 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
 
   if (response.status === 204) return undefined as T;
   return response.json();
+}
+
+/** Client API avec gestion automatique du token, de la région, et refresh sur 401 */
+export async function apiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { accessToken, region } = useAuthStore.getState();
+
+  if (!accessToken) {
+    // Try refreshing the token before giving up
+    const { refreshAccessToken } = await import('./workspaceApi');
+    const freshToken = await refreshAccessToken();
+    if (!freshToken) {
+      throw new Error('No access token available — extension is not connected to Trimble Connect');
+    }
+    return doFetch<T>(endpoint, options, freshToken, region);
+  }
+
+  try {
+    return await doFetch<T>(endpoint, options, accessToken, region);
+  } catch (error) {
+    // On 401, try refreshing the token once
+    if (error instanceof ApiError && error.status === 401) {
+      console.warn('[apiClient] 401 received, attempting token refresh...');
+      const { refreshAccessToken } = await import('./workspaceApi');
+      const freshToken = await refreshAccessToken();
+      if (freshToken) {
+        return doFetch<T>(endpoint, options, freshToken, region);
+      }
+    }
+    throw error;
+  }
 }
 
 /** Erreur API custom */

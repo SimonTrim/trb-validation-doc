@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { apiRequest, withRetry } from './apiClient';
+import { useAuthStore } from '@/stores/authStore';
 import type { ConnectFile, ConnectFolder, ConnectUser } from '@/models/trimble';
 
 // ─── FICHIERS ───────────────────────────────────────────────────────────────
@@ -30,12 +31,41 @@ export async function getFolderItems(folderId: string): Promise<(ConnectFile | C
 
 /** Lister les dossiers d'un projet (racine + premier niveau) */
 export async function getProjectFolders(projectId: string): Promise<ConnectFolder[]> {
+  // Use rootId from auth store if available (avoids extra API call)
+  const { project, accessToken } = useAuthStore.getState();
+  const rootId = project?.rootId;
+  console.log('[trimbleService] getProjectFolders — projectId:', projectId, 'rootId:', rootId, 'hasToken:', !!accessToken);
+
+  if (rootId) {
+    // Directly list root folder contents using the existing /folders/:folderId/items route
+    console.log('[trimbleService] Using rootId shortcut:', rootId);
+    const items = await withRetry(() => apiRequest<any[]>(`/folders/${rootId}/items`));
+    console.log('[trimbleService] Root folder items received:', items?.length, 'items');
+    const folders: ConnectFolder[] = (items || [])
+      .filter((item: any) => {
+        const t = (item.type || '').toUpperCase();
+        return t === 'FOLDER' || t === 'DIR' || (item.id && !item.size && !item.extension && item.name);
+      })
+      .map((f: any) => ({ id: f.id, name: f.name, parentId: f.parentId || rootId }));
+    console.log('[trimbleService] Filtered to', folders.length, 'folders');
+    // Prepend root folder
+    return [{ id: rootId, name: project?.name || 'Racine du projet', parentId: '' }, ...folders];
+  }
+
+  // Fallback: use backend route (fetches rootId via TC API)
+  console.log('[trimbleService] No rootId, using fallback /projects/${projectId}/folders');
   return withRetry(() => apiRequest<ConnectFolder[]>(`/projects/${projectId}/folders`));
 }
 
 /** Lister les sous-dossiers d'un dossier */
 export async function getSubFolders(folderId: string): Promise<ConnectFolder[]> {
-  return withRetry(() => apiRequest<ConnectFolder[]>(`/folders/${folderId}/subfolders`));
+  const items = await withRetry(() => apiRequest<any[]>(`/folders/${folderId}/items`));
+  return items
+    .filter((item: any) => {
+      const t = (item.type || '').toUpperCase();
+      return t === 'FOLDER' || t === 'DIR' || (item.id && !item.size && !item.extension && item.name);
+    })
+    .map((f: any) => ({ id: f.id, name: f.name, parentId: f.parentId || folderId }));
 }
 
 /** Uploader un fichier dans un dossier TC (via le backend) */
