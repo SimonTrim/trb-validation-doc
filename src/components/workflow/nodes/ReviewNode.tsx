@@ -5,7 +5,9 @@ import type { WorkflowNodeData } from '@/models/workflow';
 
 export function ReviewNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as WorkflowNodeData;
-  const assigneeCount = nodeData.assignees?.length || 0;
+  // Use reviewerDetails as the source of truth; fall back to assignees count
+  const reviewerDetails = (nodeData.reviewerDetails as unknown as Array<unknown>) || [];
+  const assigneeCount = reviewerDetails.length > 0 ? reviewerDetails.length : (nodeData.assignees?.length || 0);
   const requiredApprovals = nodeData.requiredApprovals || 1;
 
   return (

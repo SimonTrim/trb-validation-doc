@@ -453,8 +453,10 @@ export function App() {
           await initializeStores('production');
           console.log('[App] Production data loaded successfully');
         } catch (err) {
-          console.warn('[App] Production load failed, loading demo data:', err);
-          loadDemoData();
+          console.error('[App] Production data load failed:', err);
+          // In production mode, do NOT fallback to demo data.
+          // Show empty state — real data will load when connection stabilizes.
+          toast.error('Impossible de charger les données. Vérifiez la connexion.');
         }
       } else {
         loadDemoData();

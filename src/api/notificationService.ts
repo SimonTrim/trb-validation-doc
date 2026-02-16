@@ -13,6 +13,8 @@ export interface EmailNotificationPayload {
   reviewerName?: string;
   projectName?: string;
   projectId?: string;
+  nodeName?: string;
+  initiatorName?: string;
 }
 
 export interface EmailNotificationResult {
@@ -56,6 +58,7 @@ export async function notifyReviewers(params: {
   projectName?: string;
   projectId?: string;
   nodeName?: string;
+  initiatorName?: string;
 }): Promise<void> {
   const { reviewers, documentName, workflowName, projectName, projectId, nodeName } = params;
 
@@ -83,6 +86,8 @@ export async function notifyReviewers(params: {
       reviewerName: reviewer.name || reviewer.email,
       projectName: projectName || '',
       projectId: projectId || '',
+      nodeName: nodeName || '',
+      initiatorName: params.initiatorName || '',
     })
   );
 

@@ -612,6 +612,9 @@ class WorkflowEngineClass {
     const authState = useAuthStore.getState();
     const projectName = authState.project?.name || '';
     const projectId = authState.project?.id || '';
+    const currentUserName = authState.currentUser
+      ? `${authState.currentUser.firstName || ''} ${authState.currentUser.lastName || ''}`.trim() || authState.currentUser.email
+      : instance.startedBy || '';
 
     // Send email notifications (non-blocking)
     notifyReviewers({
@@ -625,6 +628,7 @@ class WorkflowEngineClass {
       projectName,
       projectId,
       nodeName: (nodeData.label as string) || node.type,
+      initiatorName: currentUserName,
     }).catch((err) => {
       console.warn('[WorkflowEngine] Email notification failed (non-blocking):', err);
     });

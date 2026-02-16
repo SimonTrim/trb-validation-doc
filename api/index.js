@@ -1085,7 +1085,7 @@ app.post('/api/auth/refresh', async (req, res) => {
 
 app.post('/api/notifications/email', async (req, res) => {
   try {
-    const { to, subject, html, documentName, workflowName, reviewerName, projectName, projectId } = req.body;
+    const { to, subject, html, documentName, workflowName, reviewerName, projectName, projectId, nodeName, initiatorName } = req.body;
 
     if (!to || !subject) {
       return res.status(400).json({ error: 'Missing required fields: to, subject' });
@@ -1107,6 +1107,8 @@ app.post('/api/notifications/email', async (req, res) => {
       workflowName: workflowName || 'Workflow',
       projectName: projectName || '',
       projectId: projectId || '',
+      nodeName: nodeName || '',
+      initiatorName: initiatorName || '',
     });
 
     const response = await fetch('https://api.resend.com/emails', {
@@ -1139,11 +1141,14 @@ app.post('/api/notifications/email', async (req, res) => {
 });
 
 /** Build a styled HTML email for review notification */
-function buildReviewNotificationHtml({ reviewerName, documentName, workflowName, projectName, projectId }) {
+function buildReviewNotificationHtml({ reviewerName, documentName, workflowName, projectName, projectId, nodeName, initiatorName }) {
   // Build the link to the project in Trimble Connect
   const projectLink = projectId
     ? `https://web.connect.trimble.com/projects/${projectId}`
     : 'https://web.connect.trimble.com';
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return `
 <!DOCTYPE html>
@@ -1167,23 +1172,34 @@ function buildReviewNotificationHtml({ reviewerName, documentName, workflowName,
       </p>
 
       <!-- Document card -->
-      <div style="background:#f8f9fa;border-left:4px solid #0078D4;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
+      <div style="background:#f8f9fa;border-left:4px solid #0078D4;border-radius:4px;padding:16px 20px;margin:0 0 20px;">
         <p style="margin:0 0 4px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Document à vérifier</p>
-        <p style="margin:0;font-size:16px;font-weight:600;color:#333;">📄 ${documentName}</p>
+        <p style="margin:0 0 12px;font-size:16px;font-weight:600;color:#333;">📄 ${documentName}</p>
+
+        <table style="width:100%;border-collapse:collapse;font-size:13px;color:#555;">
+          ${projectName ? `<tr><td style="padding:3px 0;color:#888;width:120px;">Projet :</td><td style="padding:3px 0;font-weight:500;">${projectName}</td></tr>` : ''}
+          <tr><td style="padding:3px 0;color:#888;width:120px;">Workflow :</td><td style="padding:3px 0;font-weight:500;">${workflowName}</td></tr>
+          ${nodeName ? `<tr><td style="padding:3px 0;color:#888;width:120px;">Étape :</td><td style="padding:3px 0;font-weight:500;">${nodeName}</td></tr>` : ''}
+          ${initiatorName ? `<tr><td style="padding:3px 0;color:#888;width:120px;">Soumis par :</td><td style="padding:3px 0;font-weight:500;">${initiatorName}</td></tr>` : ''}
+          <tr><td style="padding:3px 0;color:#888;width:120px;">Date :</td><td style="padding:3px 0;font-weight:500;">${dateStr}</td></tr>
+        </table>
       </div>
 
-      <p style="font-size:14px;color:#555;line-height:1.6;margin:0 0 24px;">
-        Veuillez ouvrir l'extension <strong>Validation Documentaire</strong> dans Trimble Connect,
-        puis accédez à l'onglet <strong>Visas</strong> pour consulter le document et soumettre votre visa.
-      </p>
+      <!-- Action required -->
+      <div style="background:#fff8e1;border-left:4px solid #f0c040;border-radius:4px;padding:12px 16px;margin:0 0 24px;">
+        <p style="margin:0;font-size:14px;color:#6d5c00;line-height:1.5;">
+          ⚠️ <strong>Action requise</strong> — Veuillez consulter ce document et soumettre votre visa
+          (approbation, observations ou rejet) dans l'extension Validation.
+        </p>
+      </div>
 
       <div style="text-align:center;margin:0 0 16px;">
-        <a href="${projectLink}" style="display:inline-block;background:#0078D4;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:6px;font-size:15px;font-weight:500;">
+        <a href="${projectLink}" style="display:inline-block;background:#0078D4;color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:6px;font-size:15px;font-weight:600;">
           Ouvrir le projet dans Trimble Connect
         </a>
       </div>
 
-      <p style="font-size:13px;color:#888;text-align:center;margin:0 0 8px;">
+      <p style="font-size:13px;color:#888;text-align:center;margin:0 0 8px;line-height:1.5;">
         Une fois dans le projet, ouvrez l'extension <strong>Validation</strong> → onglet <strong>Visas</strong>
       </p>
     </div>

@@ -86,12 +86,20 @@ export async function loadProductionData(): Promise<{
   instances: WorkflowInstance[];
   users: ConnectUser[];
 }> {
-  const { project } = useAuthStore.getState();
+  // Wait briefly for project info if not yet available (TC timing)
+  let project = useAuthStore.getState().project;
   if (!project) {
-    throw new Error('No project context available');
+    console.log('[DataLoader] Waiting for project context...');
+    await new Promise((r) => setTimeout(r, 1500));
+    project = useAuthStore.getState().project;
+  }
+  if (!project) {
+    console.warn('[DataLoader] No project context after wait — returning empty data');
+    return { documents: [], definitions: [], instances: [], users: [] };
   }
 
   const projectId = project.id;
+  console.log(`[DataLoader] Loading production data for project: ${projectId}`);
 
   // Charger en parallèle : documents validation (Turso), utilisateurs (TC), workflows (Turso)
   const [docs, users, definitions, instances] = await Promise.allSettled([
@@ -262,47 +270,36 @@ export async function initializeStores(mode: 'production' | 'demo'): Promise<voi
   const appStore = useAppStore.getState();
 
   if (mode === 'production') {
-    try {
-      const { documents, definitions, instances, users } = await loadProductionData();
-      docStore.setDocuments(documents);
-      wfStore.setDefinitions(definitions);
-      wfStore.setInstances(instances);
+    const { documents, definitions, instances, users } = await loadProductionData();
 
-      // Load custom labels
-      const projectId = useAuthStore.getState().project?.id;
-      if (projectId) {
-        try {
-          const customLabels = await getCustomLabels(projectId);
-          useLabelStore.getState().setCustomLabels(customLabels);
-        } catch (err) {
-          console.warn('[DataLoader] Failed to load custom labels:', err);
-        }
+    console.log(`[DataLoader] Loaded: ${documents.length} docs, ${definitions.length} defs, ${instances.length} instances, ${users.length} users`);
+
+    docStore.setDocuments(documents);
+    wfStore.setDefinitions(definitions);
+    wfStore.setInstances(instances);
+
+    // Load custom labels (non-blocking)
+    const projectId = useAuthStore.getState().project?.id;
+    if (projectId) {
+      try {
+        const customLabels = await getCustomLabels(projectId);
+        useLabelStore.getState().setCustomLabels(customLabels);
+      } catch (err) {
+        console.warn('[DataLoader] Failed to load custom labels:', err);
       }
-
-      // Detect and set the current user
-      await detectCurrentUser(users);
-
-      appStore.addNotification({
-        id: generateId(),
-        type: 'success',
-        title: 'Données chargées',
-        message: `${documents.length} documents et ${definitions.length} workflows chargés depuis Trimble Connect.`,
-        timestamp: new Date().toISOString(),
-        read: false,
-      });
-    } catch (error) {
-      console.error('[DataLoader] Production data load failed:', error);
-      appStore.addNotification({
-        id: generateId(),
-        type: 'error',
-        title: 'Erreur de chargement',
-        message: 'Impossible de charger les données depuis le serveur. Mode démo activé.',
-        timestamp: new Date().toISOString(),
-        read: false,
-      });
-      // Fallback to demo
-      throw error;
     }
+
+    // Detect and set the current user
+    await detectCurrentUser(users);
+
+    appStore.addNotification({
+      id: generateId(),
+      type: 'success',
+      title: 'Données chargées',
+      message: `${documents.length} document(s) et ${definitions.length} workflow(s) chargés.`,
+      timestamp: new Date().toISOString(),
+      read: false,
+    });
   }
   // 'demo' mode: data loaded by App.tsx directly
 }

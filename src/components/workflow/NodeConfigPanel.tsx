@@ -255,13 +255,16 @@ function ReviewerConfigSection({
   }, []);
 
   // Parse current assignees into structured data
-  const assignees: string[] = (nodeData.assignees as string[]) || [];
+  // reviewerDetails is the source of truth; rebuild assignees from it
   const reviewerDetails: NodeReviewer[] = (nodeData.reviewerDetails as unknown as NodeReviewer[]) || [];
+  const assignees: string[] = reviewerDetails.length > 0
+    ? reviewerDetails.map((r) => r.id)
+    : (nodeData.assignees as string[]) || [];
 
   const addReviewer = (user: NodeReviewer) => {
-    if (assignees.includes(user.id)) return;
-    const newAssignees = [...assignees, user.id];
+    if (reviewerDetails.some((r) => r.id === user.id)) return;
     const newDetails = [...reviewerDetails, user];
+    const newAssignees = newDetails.map((r) => r.id);
     updateData({
       assignees: newAssignees,
       reviewerDetails: newDetails as unknown as string[],
@@ -271,9 +274,10 @@ function ReviewerConfigSection({
   };
 
   const removeReviewer = (userId: string) => {
+    const newDetails = reviewerDetails.filter((r) => r.id !== userId);
     updateData({
-      assignees: assignees.filter((id) => id !== userId),
-      reviewerDetails: reviewerDetails.filter((r) => r.id !== userId) as unknown as string[],
+      assignees: newDetails.map((r) => r.id),
+      reviewerDetails: newDetails as unknown as string[],
     });
   };
 
