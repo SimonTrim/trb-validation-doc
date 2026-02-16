@@ -1100,6 +1100,144 @@ function buildReviewNotificationHtml({ reviewerName, documentName, workflowName,
 </html>`;
 }
 
+// ─── AI WORKFLOW GENERATION ──────────────────────────────────────────────────
+
+const AI_SYSTEM_PROMPT = `Tu es un expert en workflows de validation documentaire pour Trimble Connect.
+Tu génères des définitions de workflow au format JSON strict.
+
+TYPES DE NOEUDS DISPONIBLES :
+- "start" : Point de départ (obligatoire, un seul)
+- "status" : Étape de statut (affiche un état du document). Propriétés: statusId, color
+- "review" : Étape de vérification par un ou plusieurs réviseurs. Propriétés: requiredApprovals (nombre), assignees (vide par défaut)
+- "decision" : Branchement conditionnel basé sur les reviews
+- "action" : Action automatique (déplacer fichier, notifier, etc.). Propriétés: autoActions[]
+- "end" : Point de fin (peut y en avoir plusieurs)
+
+TYPES D'ACTIONS AUTOMATIQUES (pour les noeuds "action") :
+- "move_file" : Déplacer un fichier vers un dossier. config: { useRejectedFolder: true/false }
+- "copy_file" : Copier un fichier vers un dossier
+- "notify_user" : Envoyer une notification à un utilisateur
+- "send_comment" : Ajouter un commentaire automatique
+- "update_metadata" : Mettre à jour les métadonnées du fichier
+
+STATUTS STANDARDS (à inclure dans statuses[]) :
+- { id: "pending", name: "En attente", color: "#6a6e79", isDefault: true }
+- { id: "approved", name: "Approuvé", color: "#1e8a44" }
+- { id: "vso", name: "VSO", color: "#4caf50" }
+- { id: "vao", name: "VAO", color: "#f0c040" }
+- { id: "vao_blocking", name: "VAO Bloquantes", color: "#d4760a" }
+- { id: "commented", name: "Commenté", color: "#e49325" }
+- { id: "rejected", name: "Rejeté", color: "#da212c" }
+- { id: "refused", name: "Refusé", color: "#8b0000" }
+
+CONTRAINTES :
+- Uniquement des opérations réalisables via les APIs Trimble Connect (fichiers, dossiers, utilisateurs, todos)
+- Les positions des noeuds doivent être espacées horizontalement (~200px) et verticalement (~150px)
+- Chaque noeud a un id unique commençant par "n-"
+- Chaque edge a un id unique commençant par "e-"
+- Les edges de décision doivent avoir un label décrivant la condition
+- Les noeuds review ont assignees: [] (les utilisateurs les configureront manuellement)
+- Inclure uniquement les statuts utilisés dans le workflow
+
+FORMAT DE SORTIE (JSON strict, pas de markdown) :
+{
+  "name": "Nom du workflow",
+  "description": "Description courte",
+  "nodes": [{ "id": "n-...", "type": "...", "position": { "x": N, "y": N }, "data": { "label": "...", ... } }],
+  "edges": [{ "id": "e-...", "source": "n-...", "target": "n-...", "label": "..." }],
+  "statuses": [{ "id": "...", "name": "...", "color": "...", "isDefault": true/false }],
+  "settings": { "autoStartOnUpload": true, "notifyOnStatusChange": true, "allowResubmission": true, "parallelReviews": false }
+}`;
+
+app.post('/api/ai/generate-workflow', async (req, res) => {
+  try {
+    const { prompt, projectId, createdBy } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Missing required field: prompt' });
+    }
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'AI service not configured (OPENAI_API_KEY missing)' });
+    }
+
+    console.log(`[AI] Generating workflow from prompt: "${prompt.substring(0, 80)}..."`);
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: AI_SYSTEM_PROMPT },
+          { role: 'user', content: `Génère un workflow de validation documentaire pour Trimble Connect selon cette description :\n\n${prompt}` },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[AI] OpenAI API error:', response.status, errorText);
+      return res.status(response.status).json({ error: `AI service error: ${response.status}` });
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return res.status(500).json({ error: 'AI returned empty response' });
+    }
+
+    let workflow;
+    try {
+      workflow = JSON.parse(content);
+    } catch (parseErr) {
+      console.error('[AI] Failed to parse AI response:', content.substring(0, 200));
+      return res.status(500).json({ error: 'AI returned invalid JSON' });
+    }
+
+    // Enrich with project context
+    const now = new Date().toISOString();
+    const result = {
+      id: `wf-ai-${Date.now()}`,
+      ...workflow,
+      type: 'document_validation',
+      version: 1,
+      projectId: projectId || '',
+      createdBy: createdBy || '',
+      createdAt: now,
+      updatedAt: now,
+      isActive: false,
+      settings: {
+        autoStartOnUpload: true,
+        notifyOnStatusChange: true,
+        allowResubmission: true,
+        parallelReviews: false,
+        ...workflow.settings,
+      },
+    };
+
+    console.log(`[AI] Generated workflow "${result.name}" with ${result.nodes?.length || 0} nodes`);
+    res.json(result);
+  } catch (error) {
+    console.error('[AI] Generation error:', error);
+    res.status(500).json({ error: error.message || 'AI generation failed' });
+  }
+});
+
+// Check if AI service is available
+app.get('/api/ai/status', (req, res) => {
+  const available = !!process.env.OPENAI_API_KEY;
+  res.json({ available, model: available ? 'gpt-4o-mini' : null });
+});
+
 // ─── HEALTH CHECK ───────────────────────────────────────────────────────────
 
 app.get('/api/health', (req, res) => {

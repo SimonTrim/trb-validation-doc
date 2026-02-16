@@ -470,12 +470,11 @@ export function App() {
     }
 
     function loadDemoData() {
-      // Documents tab starts EMPTY — only documents deposited for validation appear
-      useDocumentStore.getState().setDocuments([]);
-      // Load a clean workflow template without pre-configured demo folders
+      // Load demo documents, instances and workflow definition for showcase
+      useDocumentStore.getState().setDocuments(DEMO_DOCUMENTS);
       useWorkflowStore.getState().setDefinitions([DEMO_WORKFLOW]);
-      useWorkflowStore.getState().setInstances([]);
-      console.log('[App] Demo data loaded (empty documents, ready for production use)');
+      useWorkflowStore.getState().setInstances(DEMO_INSTANCES);
+      console.log('[App] Demo data loaded (documents, instances, workflow)');
     }
 
     init();
