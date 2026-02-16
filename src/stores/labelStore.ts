@@ -1,46 +1,51 @@
 // ============================================================================
 // LABEL STORE — Gestion des labels (prédéfinis + personnalisés)
-// Les labels custom créés par l'utilisateur persistent dans ce store
-// et sont disponibles dans le LabelSelector pour tous les documents
+// Labels custom persistés dans Turso via API
 // ============================================================================
 
 import { create } from 'zustand';
 import { DEFAULT_LABELS, type DocumentLabel } from '@/models/document';
+import {
+  createCustomLabel as apiCreateLabel,
+  updateCustomLabelApi as apiUpdateLabel,
+  deleteCustomLabel as apiDeleteLabel,
+} from '@/api/documentApiService';
+import { useAuthStore } from '@/stores/authStore';
 
 interface LabelState {
-  /** Labels personnalisés créés par l'utilisateur */
   customLabels: DocumentLabel[];
 
-  /** Retourne la liste complète : prédéfinis + custom */
+  /** Set custom labels (used by dataLoader at startup) */
+  setCustomLabels: (labels: DocumentLabel[]) => void;
+
   getAllLabels: () => DocumentLabel[];
-
-  /** Ajouter un label personnalisé */
   addCustomLabel: (label: DocumentLabel) => void;
-
-  /** Supprimer un label personnalisé */
   removeCustomLabel: (id: string) => void;
-
-  /** Mettre à jour un label personnalisé */
   updateCustomLabel: (id: string, updates: Partial<DocumentLabel>) => void;
 }
 
 export const useLabelStore = create<LabelState>((set, get) => ({
   customLabels: [],
 
+  setCustomLabels: (labels) => set({ customLabels: labels }),
+
   getAllLabels: () => {
     return [...DEFAULT_LABELS, ...get().customLabels];
   },
 
   addCustomLabel: (label) => {
-    set((s) => ({
-      customLabels: [...s.customLabels, label],
-    }));
+    set((s) => ({ customLabels: [...s.customLabels, label] }));
+    const projectId = useAuthStore.getState().project?.id || '';
+    apiCreateLabel({ ...label, projectId }).catch((err) => {
+      console.warn('[LabelStore] Failed to persist new label:', err);
+    });
   },
 
   removeCustomLabel: (id) => {
-    set((s) => ({
-      customLabels: s.customLabels.filter((l) => l.id !== id),
-    }));
+    set((s) => ({ customLabels: s.customLabels.filter((l) => l.id !== id) }));
+    apiDeleteLabel(id).catch((err) => {
+      console.warn('[LabelStore] Failed to persist label deletion:', err);
+    });
   },
 
   updateCustomLabel: (id, updates) => {
@@ -49,5 +54,8 @@ export const useLabelStore = create<LabelState>((set, get) => ({
         l.id === id ? { ...l, ...updates } : l
       ),
     }));
+    apiUpdateLabel(id, updates).catch((err) => {
+      console.warn('[LabelStore] Failed to persist label update:', err);
+    });
   },
 }));

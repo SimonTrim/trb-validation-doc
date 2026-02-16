@@ -55,6 +55,14 @@ export async function initializeDatabase() {
     await client.execute(stmt + ';');
   }
 
+  // ── Migrations for existing databases ──
+  const migrations = [
+    "ALTER TABLE document_comments ADD COLUMN reactions_json TEXT DEFAULT '[]'",
+  ];
+  for (const migration of migrations) {
+    try { await client.execute(migration + ';'); } catch (_) { /* column already exists */ }
+  }
+
   console.log('[Database] Schema initialized');
   return client;
 }
@@ -356,6 +364,26 @@ export async function createDocumentComment(comment) {
   return comment;
 }
 
+export async function updateDocumentComment(id, data) {
+  const client = getDatabase();
+  const sets = [];
+  const args = [];
+  if (data.reactions !== undefined) {
+    sets.push('reactions_json = ?');
+    args.push(JSON.stringify(data.reactions));
+  }
+  if (data.content !== undefined) {
+    sets.push('content = ?');
+    args.push(data.content);
+  }
+  if (sets.length === 0) return;
+  args.push(id);
+  await client.execute({
+    sql: `UPDATE document_comments SET ${sets.join(', ')} WHERE id = ?`,
+    args,
+  });
+}
+
 export async function deleteDocumentComment(id) {
   const client = getDatabase();
   await client.execute({ sql: 'DELETE FROM document_comments WHERE id = ?', args: [id] });
@@ -383,6 +411,65 @@ export async function setDocumentLabels(documentId, labels) {
       args: [documentId, label.id, label.name, label.color],
     });
   }
+}
+
+// ─── CUSTOM LABELS ──────────────────────────────────────────────────────────
+
+export async function getCustomLabels(projectId) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM custom_labels WHERE project_id = ? ORDER BY created_at ASC',
+    args: [projectId],
+  });
+  return result.rows.map((r) => ({ id: r.id, name: r.name, color: r.color }));
+}
+
+export async function createCustomLabel(label) {
+  const client = getDatabase();
+  await client.execute({
+    sql: 'INSERT INTO custom_labels (id, project_id, name, color) VALUES (?, ?, ?, ?)',
+    args: [label.id, label.projectId, label.name, label.color],
+  });
+  return { id: label.id, name: label.name, color: label.color };
+}
+
+export async function updateCustomLabel(id, data) {
+  const client = getDatabase();
+  const sets = [];
+  const args = [];
+  if (data.name !== undefined) { sets.push('name = ?'); args.push(data.name); }
+  if (data.color !== undefined) { sets.push('color = ?'); args.push(data.color); }
+  if (sets.length === 0) return;
+  args.push(id);
+  await client.execute({ sql: `UPDATE custom_labels SET ${sets.join(', ')} WHERE id = ?`, args });
+}
+
+export async function deleteCustomLabel(id) {
+  const client = getDatabase();
+  await client.execute({ sql: 'DELETE FROM custom_labels WHERE id = ?', args: [id] });
+}
+
+// ─── USER PREFERENCES ───────────────────────────────────────────────────────
+
+export async function getUserPreferences(userId, projectId) {
+  const client = getDatabase();
+  const result = await client.execute({
+    sql: 'SELECT * FROM user_preferences WHERE user_id = ? AND project_id = ?',
+    args: [userId, projectId],
+  });
+  if (result.rows.length === 0) return {};
+  try { return JSON.parse(result.rows[0].prefs_json || '{}'); } catch { return {}; }
+}
+
+export async function setUserPreferences(userId, projectId, prefs) {
+  const client = getDatabase();
+  const id = `pref-${userId}-${projectId}`;
+  await client.execute({
+    sql: `INSERT INTO user_preferences (id, user_id, project_id, prefs_json, updated_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(user_id, project_id) DO UPDATE SET prefs_json = ?, updated_at = datetime('now')`,
+    args: [id, userId, projectId, JSON.stringify(prefs), JSON.stringify(prefs)],
+  });
 }
 
 // ─── ROW MAPPERS ────────────────────────────────────────────────────────────
@@ -468,6 +555,8 @@ function rowToValidationDocument(row) {
 }
 
 function rowToComment(row) {
+  let reactions = [];
+  try { reactions = JSON.parse(row.reactions_json || '[]'); } catch (_) {}
   return {
     id: row.id,
     documentId: row.document_id,
@@ -479,6 +568,6 @@ function rowToComment(row) {
     parentId: row.parent_id || undefined,
     isSystemMessage: row.is_system_message === 1,
     attachments: [],
-    reactions: [],
+    reactions,
   };
 }

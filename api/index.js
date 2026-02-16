@@ -667,6 +667,18 @@ app.post('/api/documents/:docId/comments', requireAuth, async (req, res) => {
   }
 });
 
+// Update comment (reactions, content)
+app.put('/api/documents/:docId/comments/:commentId', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.updateDocumentComment(req.params.commentId, req.body);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delete comment
 app.delete('/api/documents/:docId/comments/:commentId', requireAuth, async (req, res) => {
   try {
@@ -689,6 +701,84 @@ app.put('/api/documents/:docId/labels', requireAuth, async (req, res) => {
       await db.setDocumentLabels(req.params.docId, labels);
     }
     res.json({ labels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── CUSTOM LABEL ROUTES ────────────────────────────────────────────────────
+
+app.get('/api/labels', requireAuth, async (req, res) => {
+  try {
+    const projectId = req.query.projectId;
+    if (await ensureDb()) {
+      const labels = await db.getCustomLabels(projectId);
+      return res.json(labels);
+    }
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/labels', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      const label = await db.createCustomLabel(req.body);
+      return res.status(201).json(label);
+    }
+    res.status(201).json(req.body);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/labels/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.updateCustomLabel(req.params.id, req.body);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/labels/:id', requireAuth, async (req, res) => {
+  try {
+    if (await ensureDb()) {
+      await db.deleteCustomLabel(req.params.id);
+    }
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── USER PREFERENCES ROUTES ────────────────────────────────────────────────
+
+app.get('/api/preferences', requireAuth, async (req, res) => {
+  try {
+    const { userId, projectId } = req.query;
+    if (!userId || !projectId) return res.json({});
+    if (await ensureDb()) {
+      const prefs = await db.getUserPreferences(userId, projectId);
+      return res.json(prefs);
+    }
+    res.json({});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/preferences', requireAuth, async (req, res) => {
+  try {
+    const { userId, projectId, ...prefs } = req.body;
+    if (!userId || !projectId) return res.status(400).json({ error: 'Missing userId or projectId' });
+    if (await ensureDb()) {
+      await db.setUserPreferences(userId, projectId, prefs);
+    }
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

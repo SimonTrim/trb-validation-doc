@@ -135,7 +135,8 @@ CREATE TABLE IF NOT EXISTS document_comments (
   content           TEXT NOT NULL,
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   parent_id         TEXT,
-  is_system_message INTEGER DEFAULT 0
+  is_system_message INTEGER DEFAULT 0,
+  reactions_json    TEXT DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_doc_comments_doc ON document_comments(document_id);
@@ -152,6 +153,31 @@ CREATE TABLE IF NOT EXISTS document_labels (
 );
 
 CREATE INDEX IF NOT EXISTS idx_doc_labels_doc ON document_labels(document_id);
+
+-- ── Labels personnalises ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS custom_labels (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  color       TEXT NOT NULL DEFAULT '#6a6e79',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_custom_labels_project ON custom_labels(project_id);
+
+-- ── Preferences utilisateur ─────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  prefs_json  TEXT DEFAULT '{}',
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_prefs_user ON user_preferences(user_id);
 
 -- ── Vue pour les statistiques ───────────────────────────────────────────────
 

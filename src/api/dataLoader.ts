@@ -7,9 +7,10 @@ import { useAuthStore } from '@/stores/authStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useAppStore } from '@/stores/appStore';
+import { useLabelStore } from '@/stores/labelStore';
 import { getProjectUsers, getFolderItems } from './trimbleService';
 import { getWorkflowDefinitions, getWorkflowInstances } from './workflowApiService';
-import { getValidationDocuments } from './documentApiService';
+import { getValidationDocuments, getCustomLabels } from './documentApiService';
 import type { ConnectFile, ConnectUser } from '@/models/trimble';
 import type { ValidationDocument, DocumentLabel, DocumentComment } from '@/models/document';
 import type { WorkflowDefinition, WorkflowInstance } from '@/models/workflow';
@@ -239,6 +240,17 @@ export async function initializeStores(mode: 'production' | 'demo'): Promise<voi
       docStore.setDocuments(documents);
       wfStore.setDefinitions(definitions);
       wfStore.setInstances(instances);
+
+      // Load custom labels
+      const projectId = useAuthStore.getState().project?.id;
+      if (projectId) {
+        try {
+          const customLabels = await getCustomLabels(projectId);
+          useLabelStore.getState().setCustomLabels(customLabels);
+        } catch (err) {
+          console.warn('[DataLoader] Failed to load custom labels:', err);
+        }
+      }
 
       // Detect and set the current user
       await detectCurrentUser(users);

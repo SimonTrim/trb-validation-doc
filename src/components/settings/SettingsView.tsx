@@ -3,7 +3,7 @@
 // Connexion API, configuration des workflows, préférences
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings, Globe, Key, FolderOpen, Bell, Shield,
   RefreshCw, Database, CheckCircle, XCircle, Info,
@@ -24,6 +24,7 @@ import { useAppStore } from '@/stores/appStore';
 import { usePermissionStore, type UserRole } from '@/stores/permissionStore';
 import { initializeStores } from '@/api/dataLoader';
 import { toast } from 'sonner';
+import { getUserPreferences, setUserPreferences } from '@/api/documentApiService';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { WorkflowSettingsPanel } from '@/components/workflow/WorkflowSettingsPanel';
 import { FolderWatcher } from '@/engine';
@@ -147,7 +148,7 @@ export function SettingsView() {
                     <XCircle className="h-4 w-4 text-muted-foreground" />
                   )}
                   <span className="text-sm font-medium">
-                    {isConnected ? 'Connecté à Trimble Connect' : 'Non connecté (mode démo)'}
+                    {isConnected ? 'Connecté à Trimble Connect' : 'Non connecté'}
                   </span>
                 </div>
                 <Badge variant={isConnected ? 'default' : 'secondary'}>
@@ -158,8 +159,8 @@ export function SettingsView() {
               <Separator />
 
               {/* Projet */}
-              <InfoRow label="Projet" value={project?.name || 'Projet démo (proj-1)'} />
-              <InfoRow label="ID Projet" value={project?.id || 'proj-1'} copyable />
+              <InfoRow label="Projet" value={project?.name || 'Aucun projet'} />
+              <InfoRow label="ID Projet" value={project?.id || '-'} copyable />
               <InfoRow label="Région" value={project?.location || 'EU (par défaut)'} />
 
               <Separator />
@@ -170,10 +171,10 @@ export function SettingsView() {
                 value={
                   currentUser
                     ? `${currentUser.firstName} ${currentUser.lastName}`
-                    : 'Utilisateur démo'
+                    : 'Non connecté'
                 }
               />
-              <InfoRow label="Email" value={currentUser?.email || 'demo@example.com'} />
+              <InfoRow label="Email" value={currentUser?.email || '-'} />
 
               <Separator />
 
@@ -186,7 +187,7 @@ export function SettingsView() {
                       ? showToken
                         ? accessToken.substring(0, 40) + '...'
                         : '••••••••••••••••••••'
-                      : 'Aucun token (mode démo)'}
+                      : 'Aucun token'}
                   </p>
                 </div>
                 {accessToken && (
@@ -371,8 +372,9 @@ export function SettingsView() {
               <div>
                 <p className="text-sm font-medium mb-1">Stockage</p>
                 <p className="text-xs text-muted-foreground">
-                  Les données sont actuellement stockées en mémoire (mode démo).
-                  En production, elles seront persistées via Turso/SQLite sur le backend.
+                  {isConnected
+                    ? 'Les données sont persistées via Turso/SQLite sur le backend. Les fichiers sont gérés dans Trimble Connect.'
+                    : 'Les données sont stockées en mémoire locale (mode hors ligne). Connectez-vous à Trimble Connect pour la persistance.'}
                 </p>
               </div>
             </CardContent>
@@ -639,7 +641,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 
 // ── Email Notification Preferences ───────────────────────────────────────
 function EmailNotificationSettings() {
-  const [emailPrefs, setEmailPrefs] = useState({
+  const defaultPrefs = {
     enabled: true,
     onNewDocument: true,
     onVisaRequested: true,
@@ -649,11 +651,39 @@ function EmailNotificationSettings() {
     onCommentAdded: false,
     onWorkflowCompleted: true,
     digestFrequency: 'instant' as 'instant' | 'daily' | 'weekly',
-  });
+  };
+
+  const [emailPrefs, setEmailPrefs] = useState(defaultPrefs);
+  const [loaded, setLoaded] = useState(false);
+
+  // Load preferences from backend
+  useEffect(() => {
+    const { currentUser, project } = useAuthStore.getState();
+    if (!currentUser?.id || !project?.id) return;
+    getUserPreferences(currentUser.id, project.id)
+      .then((prefs) => {
+        if (prefs && typeof prefs === 'object' && Object.keys(prefs).length > 0) {
+          setEmailPrefs((p) => ({ ...p, ...prefs } as typeof p));
+        }
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  // Save preferences to backend on change (debounced via loaded flag)
+  const persistPrefs = (newPrefs: typeof defaultPrefs) => {
+    const { currentUser, project } = useAuthStore.getState();
+    if (!currentUser?.id || !project?.id) return;
+    setUserPreferences(currentUser.id, project.id, newPrefs as unknown as Record<string, unknown>).catch((err) => {
+      console.warn('[Settings] Failed to persist email prefs:', err);
+    });
+  };
 
   const toggle = (key: keyof typeof emailPrefs) => {
     if (typeof emailPrefs[key] === 'boolean') {
-      setEmailPrefs((p) => ({ ...p, [key]: !p[key] }));
+      const updated = { ...emailPrefs, [key]: !emailPrefs[key] };
+      setEmailPrefs(updated as typeof emailPrefs);
+      persistPrefs(updated as typeof emailPrefs);
     }
   };
 
@@ -697,7 +727,11 @@ function EmailNotificationSettings() {
             </div>
             <Select
               value={emailPrefs.digestFrequency}
-              onValueChange={(v) => setEmailPrefs((p) => ({ ...p, digestFrequency: v as typeof p.digestFrequency }))}
+              onValueChange={(v) => {
+                const updated = { ...emailPrefs, digestFrequency: v as typeof emailPrefs.digestFrequency };
+                setEmailPrefs(updated);
+                persistPrefs(updated);
+              }}
             >
               <SelectTrigger className="w-[140px] h-8 text-xs">
                 <SelectValue />
@@ -731,8 +765,7 @@ function EmailNotificationSettings() {
 
           <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5 inline mr-1" />
-            Les emails sont envoyés à l'adresse associée à votre compte Trimble Connect.
-            Cette fonctionnalité nécessite la configuration du serveur SMTP côté backend.
+            Les emails sont envoyés à l'adresse associée à votre compte Trimble Connect via le service Resend.
           </div>
         </CardContent>
       )}

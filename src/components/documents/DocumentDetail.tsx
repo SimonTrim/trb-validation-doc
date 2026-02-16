@@ -3,12 +3,12 @@
 // Labels, métadonnées, visas, commentaires enrichis avec émojis/PJ/réactions
 // ============================================================================
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   FileText, Download, Clock, User, UserCheck, Calendar,
-  FolderOpen, History, Eye, Box, Pen, GitCommit, ArrowUpRight,
+  FolderOpen, History, Eye, Box, Pen, GitCommit, ArrowUpRight, Loader2,
 } from 'lucide-react';
-import { getFileDownloadUrl } from '@/api/trimbleService';
+import { getFileDownloadUrl, getFileVersions } from '@/api/trimbleService';
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from '@/components/ui/sheet';
@@ -29,7 +29,7 @@ import { DocumentPrintView } from './DocumentPrintView';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { openInViewer, openForAnnotation, canOpenInViewer, getViewerType } from '@/lib/viewerIntegration';
-import { createDocumentComment } from '@/api/documentApiService';
+import { createDocumentComment, updateDocumentComment } from '@/api/documentApiService';
 import { updateValidationDocument, updateDocumentLabels } from '@/api/documentApiService';
 import { formatDate, formatDateTime, formatFileSize, generateId } from '@/lib/utils';
 import type { CommentAttachment, CommentReaction, DocumentComment, DocumentVersion } from '@/models/document';
@@ -41,8 +41,47 @@ export function DocumentDetail() {
 
   const doc = selectedDocument;
 
+  // ── Chargement des versions depuis Trimble Connect ─────────────────
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsFetched, setVersionsFetched] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!doc.fileId || !isDetailOpen) return;
+    if (versionsFetched === doc.fileId) return;
+
+    const { isConnected } = useAuthStore.getState();
+    if (!isConnected) return;
+
+    setVersionsLoading(true);
+    getFileVersions(doc.fileId)
+      .then((versions) => {
+        if (versions && versions.length > 0) {
+          const mapped: DocumentVersion[] = versions.map((v, idx) => ({
+            versionNumber: (v as any).versionNumber || idx + 1,
+            versionId: v.id || '',
+            fileName: v.name || doc.fileName,
+            fileSize: v.size || 0,
+            uploadedBy: (v as any).createdBy || (v as any).modifiedBy || '',
+            uploadedByName: typeof (v as any).createdBy === 'object'
+              ? (v as any).createdBy?.firstName || (v as any).createdBy?.email || ''
+              : String((v as any).createdBy || ''),
+            uploadedAt: (v as any).createdOn || (v as any).modifiedOn || '',
+            comment: (v as any).description || '',
+          }));
+          updateDocument(doc.id, { versionHistory: mapped, versionNumber: mapped.length });
+        }
+        setVersionsFetched(doc.fileId);
+      })
+      .catch((err) => {
+        console.warn('[DocumentDetail] Failed to load file versions:', err);
+        setVersionsFetched(doc.fileId);
+      })
+      .finally(() => setVersionsLoading(false));
+  }, [doc.fileId, doc.id, isDetailOpen, versionsFetched, updateDocument, doc.fileName]);
+
   const handleClose = () => {
     setSelectedDocument(null);
+    setVersionsFetched(null);
   };
 
   // ── Téléchargement ──────────────────────────────────────────────────
@@ -174,6 +213,14 @@ export function DocumentDetail() {
     });
 
     updateDocument(doc.id, { comments: updatedComments });
+
+    // Persist reaction change to backend (non-blocking)
+    const updatedComment = updatedComments.find((c) => c.id === commentId);
+    if (updatedComment) {
+      updateDocumentComment(doc.id, commentId, { reactions: updatedComment.reactions }).catch((err) => {
+        console.warn('[DocumentDetail] Failed to persist reaction:', err);
+      });
+    }
   };
 
   // ── Visionneuse ───────────────────────────────────────────────────────
@@ -453,8 +500,14 @@ export function DocumentDetail() {
           <TabsContent value="versions" className="flex-1 min-h-0 overflow-auto mt-0 data-[state=active]:flex data-[state=active]:flex-col">
             <ScrollArea className="flex-1">
               <div className="px-6 py-4">
+                {versionsLoading && (
+                  <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm">Chargement des versions...</span>
+                  </div>
+                )}
                 {/* Compare button */}
-                {doc.versionHistory && doc.versionHistory.length >= 2 && (
+                {!versionsLoading && doc.versionHistory && doc.versionHistory.length >= 2 && (
                   <div className="mb-4">
                     <VersionCompare
                       versions={doc.versionHistory}
@@ -462,7 +515,7 @@ export function DocumentDetail() {
                     />
                   </div>
                 )}
-                <div className="space-y-0">
+                {!versionsLoading && <div className="space-y-0">
                   {(doc.versionHistory && doc.versionHistory.length > 0
                     ? [...doc.versionHistory].sort((a, b) => b.versionNumber - a.versionNumber)
                     : [{ versionNumber: doc.versionNumber, versionId: doc.versionId || '', fileName: doc.fileName, fileSize: doc.fileSize, uploadedBy: doc.uploadedBy, uploadedByName: doc.uploadedByName, uploadedAt: doc.uploadedAt }]
@@ -537,7 +590,7 @@ export function DocumentDetail() {
                       </div>
                     );
                   })}
-                </div>
+                </div>}
               </div>
             </ScrollArea>
           </TabsContent>

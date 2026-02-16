@@ -65,6 +65,18 @@ export async function createDocumentComment(
   });
 }
 
+/** Mettre a jour un commentaire (reactions, contenu) */
+export async function updateDocumentComment(
+  documentId: string,
+  commentId: string,
+  data: { reactions?: unknown[]; content?: string }
+): Promise<void> {
+  return apiRequest<void>(`/documents/${documentId}/comments/${commentId}`, {
+    method: 'PUT',
+    body: data,
+  });
+}
+
 /** Supprimer un commentaire */
 export async function deleteDocumentComment(documentId: string, commentId: string): Promise<void> {
   return apiRequest<void>(`/documents/${documentId}/comments/${commentId}`, { method: 'DELETE' });
@@ -81,4 +93,38 @@ export async function updateDocumentLabels(
     method: 'PUT',
     body: { labels },
   });
+}
+
+// ─── CUSTOM LABELS (CATALOG) ────────────────────────────────────────────────
+
+/** Charger les labels personnalises du projet */
+export async function getCustomLabels(projectId: string): Promise<DocumentLabel[]> {
+  return apiRequest<DocumentLabel[]>(`/labels?projectId=${projectId}`);
+}
+
+/** Creer un label personnalise */
+export async function createCustomLabel(label: DocumentLabel & { projectId: string }): Promise<DocumentLabel> {
+  return apiRequest<DocumentLabel>('/labels', { method: 'POST', body: label });
+}
+
+/** Mettre a jour un label personnalise */
+export async function updateCustomLabelApi(id: string, data: Partial<DocumentLabel>): Promise<void> {
+  return apiRequest<void>(`/labels/${id}`, { method: 'PUT', body: data });
+}
+
+/** Supprimer un label personnalise */
+export async function deleteCustomLabel(id: string): Promise<void> {
+  return apiRequest<void>(`/labels/${id}`, { method: 'DELETE' });
+}
+
+// ─── USER PREFERENCES ───────────────────────────────────────────────────────
+
+/** Charger les preferences utilisateur */
+export async function getUserPreferences(userId: string, projectId: string): Promise<Record<string, unknown>> {
+  return apiRequest<Record<string, unknown>>(`/preferences?userId=${userId}&projectId=${projectId}`);
+}
+
+/** Sauvegarder les preferences utilisateur */
+export async function setUserPreferences(userId: string, projectId: string, prefs: Record<string, unknown>): Promise<void> {
+  return apiRequest<void>('/preferences', { method: 'PUT', body: { userId, projectId, ...prefs } });
 }
