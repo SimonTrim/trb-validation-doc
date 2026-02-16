@@ -1157,49 +1157,53 @@ app.post('/api/ai/generate-workflow', async (req, res) => {
       return res.status(400).json({ error: 'Missing required field: prompt' });
     }
 
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_API_KEY) {
-      return res.status(503).json({ error: 'AI service not configured (OPENAI_API_KEY missing)' });
+    const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY;
+    if (!GOOGLE_AI_API_KEY) {
+      return res.status(503).json({ error: 'AI service not configured (GOOGLE_AI_API_KEY missing)' });
     }
 
     console.log(`[AI] Generating workflow from prompt: "${prompt.substring(0, 80)}..."`);
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_AI_API_KEY}`;
+
+    const response = await fetch(geminiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: AI_SYSTEM_PROMPT },
-          { role: 'user', content: `Génère un workflow de validation documentaire pour Trimble Connect selon cette description :\n\n${prompt}` },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${AI_SYSTEM_PROMPT}\n\n---\n\nGénère un workflow de validation documentaire pour Trimble Connect selon cette description :\n\n${prompt}\n\nRéponds UNIQUEMENT avec le JSON, sans markdown ni commentaire.` }],
+          },
         ],
-        temperature: 0.7,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' },
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4000,
+          responseMimeType: 'application/json',
+        },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[AI] OpenAI API error:', response.status, errorText);
+      console.error('[AI] Gemini API error:', response.status, errorText);
       return res.status(response.status).json({ error: `AI service error: ${response.status}` });
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
+      console.error('[AI] Gemini returned no content:', JSON.stringify(data).substring(0, 300));
       return res.status(500).json({ error: 'AI returned empty response' });
     }
 
     let workflow;
     try {
-      workflow = JSON.parse(content);
+      const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      workflow = JSON.parse(cleaned);
     } catch (parseErr) {
-      console.error('[AI] Failed to parse AI response:', content.substring(0, 200));
+      console.error('[AI] Failed to parse AI response:', content.substring(0, 300));
       return res.status(500).json({ error: 'AI returned invalid JSON' });
     }
 
@@ -1234,8 +1238,8 @@ app.post('/api/ai/generate-workflow', async (req, res) => {
 
 // Check if AI service is available
 app.get('/api/ai/status', (req, res) => {
-  const available = !!process.env.OPENAI_API_KEY;
-  res.json({ available, model: available ? 'gpt-4o-mini' : null });
+  const available = !!process.env.GOOGLE_AI_API_KEY;
+  res.json({ available, model: available ? 'gemini-2.0-flash' : null });
 });
 
 // ─── HEALTH CHECK ───────────────────────────────────────────────────────────

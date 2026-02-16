@@ -242,7 +242,7 @@ export function TemplateSelector({ onSelect }: TemplateSelectorProps) {
                   <div>
                     <p className="text-sm font-medium">Service IA non configuré</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Ajoutez la variable d'environnement <code className="text-xs bg-muted px-1 rounded">OPENAI_API_KEY</code> pour activer la génération par IA.
+                      Ajoutez la variable d'environnement <code className="text-xs bg-muted px-1 rounded">GOOGLE_AI_API_KEY</code> pour activer la génération par IA.
                     </p>
                   </div>
                 </CardContent>
