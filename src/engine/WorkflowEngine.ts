@@ -591,9 +591,14 @@ class WorkflowEngineClass {
       isRequired: true,
     }));
 
+    console.log(`[WorkflowEngine] Setting reviewers on document "${instance.documentId}":`, JSON.stringify(docReviewers));
     useDocumentStore.getState().updateDocument(instance.documentId, {
       reviewers: docReviewers,
     });
+
+    // Verify the update
+    const updatedDoc = useDocumentStore.getState().documents.find((d) => d.id === instance.documentId);
+    console.log(`[WorkflowEngine] Document reviewers after update:`, updatedDoc?.reviewers?.length ?? 'doc not found');
 
     // Persist reviewers to backend via metadata (serialize as JSON string)
     updateValidationDocument(instance.documentId, {
@@ -604,7 +609,9 @@ class WorkflowEngineClass {
 
     console.log(`[WorkflowEngine] Assigned ${reviewerDetails.length} reviewer(s) to document "${instance.documentName}"`);
 
-    const projectName = useAuthStore.getState().project?.name || '';
+    const authState = useAuthStore.getState();
+    const projectName = authState.project?.name || '';
+    const projectId = authState.project?.id || '';
 
     // Send email notifications (non-blocking)
     notifyReviewers({
@@ -616,6 +623,7 @@ class WorkflowEngineClass {
       documentName: instance.documentName,
       workflowName: definition.name,
       projectName,
+      projectId,
       nodeName: (nodeData.label as string) || node.type,
     }).catch((err) => {
       console.warn('[WorkflowEngine] Email notification failed (non-blocking):', err);

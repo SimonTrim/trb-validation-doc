@@ -184,37 +184,64 @@ export async function loadFolderFiles(folderId: string): Promise<ConnectFile[]> 
 /** Tente d'identifier l'utilisateur courant parmi les utilisateurs du projet */
 async function detectCurrentUser(users: ConnectUser[]): Promise<void> {
   const authStore = useAuthStore.getState();
-  if (authStore.currentUser) return; // already set
+  if (authStore.currentUser) {
+    console.log('[DataLoader] Current user already set:', authStore.currentUser.email);
+    return;
+  }
 
   // Try to get user info from the access token (JWT payload)
   try {
     const token = authStore.accessToken;
     if (token) {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      const email = payload.email || payload.sub || payload.unique_name || '';
-      if (email) {
+      console.log('[DataLoader] JWT payload claims:', Object.keys(payload).join(', '));
+
+      // Try multiple claim names for email (Trimble tokens may vary)
+      const email = payload.email
+        || payload.preferred_username
+        || payload.unique_name
+        || payload.upn
+        || '';
+
+      // Also try sub as a fallback if it looks like an email
+      const sub = payload.sub || '';
+      const effectiveEmail = email || (sub.includes('@') ? sub : '');
+
+      console.log('[DataLoader] JWT email:', effectiveEmail, 'sub:', sub);
+
+      if (effectiveEmail) {
         const match = users.find(
-          (u) => u.email.toLowerCase() === email.toLowerCase()
+          (u) => u.email.toLowerCase() === effectiveEmail.toLowerCase()
         );
         if (match) {
           authStore.setCurrentUser(match);
-          console.log('[DataLoader] Current user detected:', match.firstName, match.lastName);
+          console.log('[DataLoader] Current user detected from JWT match:', match.email, 'id:', match.id);
           return;
         }
         // User found in token but not in project users — create a basic entry
         authStore.setCurrentUser({
-          id: payload.sub || email,
-          email,
-          firstName: payload.given_name || payload.firstName || email.split('@')[0],
+          id: sub || effectiveEmail,
+          email: effectiveEmail,
+          firstName: payload.given_name || payload.firstName || effectiveEmail.split('@')[0],
           lastName: payload.family_name || payload.lastName || '',
           role: 'USER',
         });
-        console.log('[DataLoader] Current user from token:', email);
+        console.log('[DataLoader] Current user from token (no project match):', effectiveEmail);
         return;
       }
+
+      // If sub is a UUID, try to match it against user IDs
+      if (sub && !sub.includes('@')) {
+        const matchById = users.find((u) => u.id === sub);
+        if (matchById) {
+          authStore.setCurrentUser(matchById);
+          console.log('[DataLoader] Current user matched by sub ID:', matchById.email);
+          return;
+        }
+      }
     }
-  } catch {
-    // Token parsing failed — not blocking
+  } catch (err) {
+    console.warn('[DataLoader] Token parsing failed:', err);
   }
 
   // Fallback: first admin user, or first user

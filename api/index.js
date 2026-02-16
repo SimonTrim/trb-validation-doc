@@ -1085,7 +1085,7 @@ app.post('/api/auth/refresh', async (req, res) => {
 
 app.post('/api/notifications/email', async (req, res) => {
   try {
-    const { to, subject, html, documentName, workflowName, reviewerName, projectName } = req.body;
+    const { to, subject, html, documentName, workflowName, reviewerName, projectName, projectId } = req.body;
 
     if (!to || !subject) {
       return res.status(400).json({ error: 'Missing required fields: to, subject' });
@@ -1106,6 +1106,7 @@ app.post('/api/notifications/email', async (req, res) => {
       documentName: documentName || 'Document',
       workflowName: workflowName || 'Workflow',
       projectName: projectName || '',
+      projectId: projectId || '',
     });
 
     const response = await fetch('https://api.resend.com/emails', {
@@ -1138,7 +1139,12 @@ app.post('/api/notifications/email', async (req, res) => {
 });
 
 /** Build a styled HTML email for review notification */
-function buildReviewNotificationHtml({ reviewerName, documentName, workflowName, projectName }) {
+function buildReviewNotificationHtml({ reviewerName, documentName, workflowName, projectName, projectId }) {
+  // Build the link to the project in Trimble Connect
+  const projectLink = projectId
+    ? `https://web.connect.trimble.com/projects/${projectId}`
+    : 'https://web.connect.trimble.com';
+
   return `
 <!DOCTYPE html>
 <html lang="fr">
@@ -1167,15 +1173,19 @@ function buildReviewNotificationHtml({ reviewerName, documentName, workflowName,
       </div>
 
       <p style="font-size:14px;color:#555;line-height:1.6;margin:0 0 24px;">
-        Veuillez ouvrir l'extension <strong>Validation Documentaire</strong> dans Trimble Connect
-        pour consulter le document et soumettre votre visa.
+        Veuillez ouvrir l'extension <strong>Validation Documentaire</strong> dans Trimble Connect,
+        puis accédez à l'onglet <strong>Visas</strong> pour consulter le document et soumettre votre visa.
       </p>
 
       <div style="text-align:center;margin:0 0 16px;">
-        <a href="https://web.connect.trimble.com" style="display:inline-block;background:#0078D4;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:6px;font-size:15px;font-weight:500;">
-          Ouvrir Trimble Connect
+        <a href="${projectLink}" style="display:inline-block;background:#0078D4;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:6px;font-size:15px;font-weight:500;">
+          Ouvrir le projet dans Trimble Connect
         </a>
       </div>
+
+      <p style="font-size:13px;color:#888;text-align:center;margin:0 0 8px;">
+        Une fois dans le projet, ouvrez l'extension <strong>Validation</strong> → onglet <strong>Visas</strong>
+      </p>
     </div>
 
     <!-- Footer -->

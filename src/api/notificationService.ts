@@ -12,6 +12,7 @@ export interface EmailNotificationPayload {
   workflowName?: string;
   reviewerName?: string;
   projectName?: string;
+  projectId?: string;
 }
 
 export interface EmailNotificationResult {
@@ -53,9 +54,10 @@ export async function notifyReviewers(params: {
   documentName: string;
   workflowName: string;
   projectName?: string;
+  projectId?: string;
   nodeName?: string;
 }): Promise<void> {
-  const { reviewers, documentName, workflowName, projectName, nodeName } = params;
+  const { reviewers, documentName, workflowName, projectName, projectId, nodeName } = params;
 
   if (!reviewers || reviewers.length === 0) {
     console.log('[NotificationService] No reviewers to notify');
@@ -80,6 +82,7 @@ export async function notifyReviewers(params: {
       workflowName,
       reviewerName: reviewer.name || reviewer.email,
       projectName: projectName || '',
+      projectId: projectId || '',
     })
   );
 

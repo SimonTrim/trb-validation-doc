@@ -45,7 +45,7 @@ export function VisaPanel() {
   const [submittedDocs, setSubmittedDocs] = useState<Set<string>>(new Set());
 
   const currentUser = useAuthStore((s) => s.currentUser);
-  const currentUserEmail = currentUser?.email || '';
+  const currentUserEmail = (currentUser?.email || '').toLowerCase();
   const currentUserId = currentUser?.id || '';
 
   // Documents pending review BY THE CURRENT USER
@@ -54,9 +54,24 @@ export function VisaPanel() {
       doc.reviewers.some(
         (r) =>
           !r.decision &&
-          (r.userId === currentUserId || r.userEmail === currentUserEmail)
+          (r.userId === currentUserId ||
+           (r.userEmail && r.userEmail.toLowerCase() === currentUserEmail))
       ) && !submittedDocs.has(doc.id)
   );
+
+  // Debug: log matching info on mount / change
+  React.useEffect(() => {
+    if (currentUserEmail) {
+      const docsWithReviewers = documents.filter((d) => d.reviewers.length > 0);
+      console.log(`[VisaPanel] Current user: id=${currentUserId}, email=${currentUserEmail}`);
+      console.log(`[VisaPanel] Documents with reviewers: ${docsWithReviewers.length}, pending for me: ${pendingReviews.length}`);
+      docsWithReviewers.forEach((d) => {
+        d.reviewers.forEach((r) => {
+          console.log(`[VisaPanel]   doc=${d.fileName} reviewer=${r.userEmail} userId=${r.userId} decision=${r.decision || 'none'}`);
+        });
+      });
+    }
+  }, [documents, currentUserEmail, currentUserId, pendingReviews.length]);
 
   const handleSubmitVisa = async (docId: string) => {
     const decision = selectedDecisions[docId];

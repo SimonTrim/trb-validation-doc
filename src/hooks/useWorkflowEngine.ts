@@ -106,10 +106,12 @@ export function useWorkflowEngine() {
           observations,
         });
 
-        // Mettre à jour le reviewer dans le document
+        // Mettre à jour le reviewer dans le document (match by ID or email)
+        const myId = currentUser?.id || 'current-user';
+        const myEmail = (currentUser?.email || '').toLowerCase();
         useDocumentStore.getState().updateDocument(documentId, {
           reviewers: document.reviewers.map((r) =>
-            r.userId === (currentUser?.id || 'current-user')
+            (r.userId === myId || (r.userEmail && r.userEmail.toLowerCase() === myEmail))
               ? { ...r, decision, decidedAt: new Date().toISOString() }
               : r
           ),

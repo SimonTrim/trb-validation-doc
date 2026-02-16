@@ -38,12 +38,16 @@ export function AppSidebar() {
   const { documents } = useDocumentStore();
 
   const currentUser = useAuthStore((s) => s.currentUser);
-  const currentUserEmail = currentUser?.email || '';
+  const currentUserEmail = (currentUser?.email || '').toLowerCase();
   const currentUserId = currentUser?.id || '';
 
   const pendingCount = documents.filter((d) => d.currentStatus.id === 'pending').length;
   const pendingVisas = documents.filter((d) =>
-    d.reviewers.some((r) => !r.decision && (r.userId === currentUserId || r.userEmail === currentUserEmail))
+    d.reviewers.some((r) =>
+      !r.decision &&
+      (r.userId === currentUserId ||
+       (r.userEmail && r.userEmail.toLowerCase() === currentUserEmail))
+    )
   ).length;
   const unreadNotifs = notifications.filter((n) => !n.read).length;
 
