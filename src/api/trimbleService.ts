@@ -107,10 +107,10 @@ export async function copyFile(fileId: string, targetFolderId: string): Promise<
 }
 
 /** Déplacer un fichier vers un autre dossier (copie + suppression source) */
-export async function moveFile(fileId: string, targetFolderId: string): Promise<ConnectFile> {
+export async function moveFile(fileId: string, targetFolderId: string, sourceFolderId?: string): Promise<ConnectFile> {
   return apiRequest<ConnectFile>('/files/move', {
     method: 'POST',
-    body: { fileId, targetFolderId },
+    body: { fileId, targetFolderId, sourceFolderId },
   });
 }
 

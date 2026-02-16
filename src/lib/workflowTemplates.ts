@@ -56,7 +56,7 @@ const validationStandard: WorkflowTemplate = {
       { id: 'n-commented', type: 'status', position: { x: 920, y: 250 }, data: { label: 'Commenté', statusId: 'commented', color: '#e49325' } },
       { id: 'n-rejected', type: 'status', position: { x: 920, y: 400 }, data: { label: 'Rejeté', statusId: 'rejected', color: '#da212c' } },
       { id: 'n-move', type: 'action', position: { x: 1140, y: 100 }, data: { label: 'Déplacer vers validé', autoActions: [{ id: 'a1', type: 'move_file', config: {}, label: 'Déplacer fichier' }] } },
-      { id: 'n-notify', type: 'action', position: { x: 1140, y: 400 }, data: { label: 'Notifier déposant', autoActions: [{ id: 'a2', type: 'notify_user', config: {}, label: 'Notification rejet' }] } },
+      { id: 'n-notify', type: 'action', position: { x: 1140, y: 400 }, data: { label: 'Déplacer vers rejeté', autoActions: [{ id: 'a2', type: 'move_file', config: { useRejectedFolder: true }, label: 'Déplacer vers rejeté' }, { id: 'a3', type: 'notify_user', config: {}, label: 'Notification rejet' }] } },
       { id: 'n-end-ok', type: 'end', position: { x: 1360, y: 100 }, data: { label: 'Fin (validé)' } },
       { id: 'n-end-ko', type: 'end', position: { x: 1360, y: 400 }, data: { label: 'Fin (rejeté)' } },
     ];
@@ -121,7 +121,7 @@ const visaBimComplet: WorkflowTemplate = {
       { id: 'n-move-ok', type: 'action', position: { x: 1400, y: 60 }, data: { label: 'Déplacer vers validé', autoActions: [{ id: 'a1', type: 'move_file', config: {}, label: 'Déplacer' }] } },
       { id: 'n-notify-vao', type: 'action', position: { x: 1400, y: 190 }, data: { label: 'Notifier observations', autoActions: [{ id: 'a2', type: 'notify_user', config: {}, label: 'Notifier VAO' }] } },
       { id: 'n-notify-bloq', type: 'action', position: { x: 1400, y: 340 }, data: { label: 'Alerter bloquant', autoActions: [{ id: 'a3', type: 'notify_user', config: { priority: 'high' }, label: 'Alerte bloquante' }] } },
-      { id: 'n-notify-rej', type: 'action', position: { x: 1400, y: 490 }, data: { label: 'Notifier rejet', autoActions: [{ id: 'a4', type: 'notify_user', config: {}, label: 'Notifier rejet' }] } },
+      { id: 'n-notify-rej', type: 'action', position: { x: 1400, y: 490 }, data: { label: 'Déplacer et notifier rejet', autoActions: [{ id: 'a4', type: 'move_file', config: { useRejectedFolder: true }, label: 'Déplacer vers rejeté' }, { id: 'a5', type: 'notify_user', config: {}, label: 'Notifier rejet' }] } },
       // Fins
       { id: 'n-end-ok', type: 'end', position: { x: 1640, y: 60 }, data: { label: 'Fin (validé)' } },
       { id: 'n-end-vao', type: 'end', position: { x: 1640, y: 190 }, data: { label: 'Fin (avec observations)' } },

@@ -8,6 +8,7 @@ import { evaluateDecision } from './DecisionEvaluator';
 import { executeAction, getActionContext, type ActionResult } from './ActionExecutor';
 import { notifyReviewers } from '@/api/notificationService';
 import * as workflowApi from '@/api/workflowApiService';
+import { updateValidationDocument } from '@/api/documentApiService';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useAppStore } from '@/stores/appStore';
@@ -577,9 +578,31 @@ class WorkflowEngineClass {
     }>) || [];
 
     if (reviewerDetails.length === 0) {
-      console.log(`[WorkflowEngine] No reviewers assigned to node "${nodeData.label}" — skipping email notification`);
+      console.log(`[WorkflowEngine] No reviewers assigned to node "${nodeData.label}" — skipping`);
       return;
     }
+
+    // ── Sync reviewers to the document so VisaPanel can display them ──
+    const docReviewers = reviewerDetails.map((r) => ({
+      userId: r.id,
+      userName: r.name || r.email,
+      userEmail: r.email,
+      role: (r.role as 'reviewer' | 'approver' | 'validator') || 'reviewer',
+      isRequired: true,
+    }));
+
+    useDocumentStore.getState().updateDocument(instance.documentId, {
+      reviewers: docReviewers,
+    });
+
+    // Persist reviewers to backend via metadata (serialize as JSON string)
+    updateValidationDocument(instance.documentId, {
+      metadata: { reviewers: JSON.stringify(docReviewers) },
+    }).catch((err) => {
+      console.warn('[WorkflowEngine] Failed to persist reviewers to backend:', err);
+    });
+
+    console.log(`[WorkflowEngine] Assigned ${reviewerDetails.length} reviewer(s) to document "${instance.documentName}"`);
 
     const projectName = useAuthStore.getState().project?.name || '';
 

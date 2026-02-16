@@ -484,6 +484,7 @@ function FolderSelector({
   onRetry?: () => void;
 }) {
   const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
 
   const filteredFolders = search
     ? folders.filter((f) =>
@@ -507,7 +508,7 @@ function FolderSelector({
         </div>
       </div>
 
-      <Popover onOpenChange={(open) => { if (open) onOpen?.(); }}>
+      <Popover open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (open) onOpen?.(); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
@@ -573,7 +574,7 @@ function FolderSelector({
                   onClick={() => {
                     onChange(folder.id);
                     setSearch('');
-                    // Load subfolders when selecting
+                    setIsOpen(false);
                     onExpandFolder?.(folder.id);
                   }}
                   className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors hover:bg-muted ${

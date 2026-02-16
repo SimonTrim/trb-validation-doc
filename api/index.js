@@ -4,6 +4,12 @@
 // + Persistance des workflows via Turso (SQLite)
 // ============================================================================
 
+// Load .env in local development (Vercel handles env vars in production)
+if (!process.env.VERCEL) {
+  const { config } = await import('dotenv');
+  config();
+}
+
 import express from 'express';
 import cors from 'cors';
 import * as db from './db/database.js';
@@ -229,20 +235,38 @@ app.post('/api/files/copy', requireAuth, async (req, res) => {
   }
 });
 
-// File move (copy + remove from source — simplified)
+// File move (copy to target + remove from source folder)
 app.post('/api/files/move', requireAuth, async (req, res) => {
   try {
-    const { fileId, targetFolderId } = req.body;
-    // Copy to target folder
+    const { fileId, targetFolderId, sourceFolderId } = req.body;
+    console.log(`[Files] Move file ${fileId} → folder ${targetFolderId} (from: ${sourceFolderId || 'unknown'})`);
+
+    // Step 1: Get file info
     const fileData = await tcFetch(req, `/files/${fileId}`);
+
+    // Step 2: Copy to target folder (add file reference to the target folder)
     const result = await tcFetch(req, `/folders/${targetFolderId}/files`, {
       method: 'POST',
       body: { fileId: fileData.id },
     });
-    // Note: Trimble Connect doesn't have a direct "move" API.
-    // In production, you would remove the file from the source folder after copy.
+
+    // Step 3: Remove from source folder (if provided)
+    const removeFromFolder = sourceFolderId || fileData.parentId;
+    if (removeFromFolder) {
+      try {
+        await tcFetch(req, `/folders/${removeFromFolder}/files/${fileId}`, {
+          method: 'DELETE',
+        });
+        console.log(`[Files] Removed file ${fileId} from source folder ${removeFromFolder}`);
+      } catch (removeErr) {
+        // Non-blocking: file was already copied, so we just warn
+        console.warn(`[Files] Could not remove file from source folder:`, removeErr.message);
+      }
+    }
+
     res.json(result || fileData);
   } catch (error) {
+    console.error('[Files] Move error:', error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
@@ -984,6 +1008,8 @@ app.post('/api/notifications/email', async (req, res) => {
       console.warn('[Notifications] RESEND_API_KEY not configured — email not sent');
       return res.json({ sent: false, reason: 'Email service not configured (RESEND_API_KEY missing)' });
     }
+
+    console.log(`[Notifications] Using Resend key: ${RESEND_API_KEY.substring(0, 8)}...${RESEND_API_KEY.slice(-4)} (${RESEND_API_KEY.length} chars), from: ${EMAIL_FROM}, to: ${to}`);
 
     const emailHtml = html || buildReviewNotificationHtml({
       reviewerName: reviewerName || 'Réviseur',

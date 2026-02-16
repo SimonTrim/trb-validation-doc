@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore, type AppView } from '@/stores/appStore';
 import { useDocumentStore } from '@/stores/documentStore';
+import { useAuthStore } from '@/stores/authStore';
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { cn } from '@/lib/utils';
 
@@ -36,8 +37,14 @@ export function AppSidebar() {
   const { currentView, sidebarCollapsed, setCurrentView, toggleSidebar, notifications, theme, setTheme } = useAppStore();
   const { documents } = useDocumentStore();
 
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const currentUserEmail = currentUser?.email || '';
+  const currentUserId = currentUser?.id || '';
+
   const pendingCount = documents.filter((d) => d.currentStatus.id === 'pending').length;
-  const pendingVisas = documents.filter((d) => d.reviewers.some((r) => !r.decision)).length;
+  const pendingVisas = documents.filter((d) =>
+    d.reviewers.some((r) => !r.decision && (r.userId === currentUserId || r.userEmail === currentUserEmail))
+  ).length;
   const unreadNotifs = notifications.filter((n) => !n.read).length;
 
   const mainNav: NavItem[] = [

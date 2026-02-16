@@ -119,7 +119,16 @@ export async function loadProductionData(): Promise<{
   // Normaliser les documents depuis Turso (ajout des champs manquants)
   const documents: ValidationDocument[] = resolvedDocs.map((doc) => ({
     ...doc,
-    reviewers: doc.reviewers || [],
+    // Restore reviewers from metadata if saved there by the workflow engine
+    reviewers: doc.reviewers?.length
+      ? doc.reviewers
+      : (() => {
+          const raw = (doc.metadata as any)?.reviewers;
+          if (!raw) return [];
+          if (Array.isArray(raw)) return raw;
+          if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return []; } }
+          return [];
+        })(),
     comments: doc.comments || [],
     labels: doc.labels || [],
     versionHistory: doc.versionHistory || [{

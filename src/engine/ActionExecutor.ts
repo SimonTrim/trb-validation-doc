@@ -94,27 +94,33 @@ async function executeMoveFile(
   document: ValidationDocument,
   context: ActionContext
 ): Promise<ActionResult> {
-  const targetFolderId = (action.config.targetFolderId as string) || context.targetFolderId;
+  // Determine the target folder: explicit config → rejected folder → approved folder
+  const isRejectedAction = (action.config.useRejectedFolder as boolean)
+    || (action.label || '').toLowerCase().includes('rejet');
+  const targetFolderId = (action.config.targetFolderId as string)
+    || (isRejectedAction ? context.rejectedFolderId : context.targetFolderId);
+
   if (!targetFolderId) {
     return {
       actionId: action.id,
       success: false,
-      message: 'Aucun dossier cible configuré pour le déplacement',
+      message: `Aucun dossier ${isRejectedAction ? 'rejeté' : 'cible'} configuré pour le déplacement`,
     };
   }
 
-  const result = await trimbleService.moveFile(document.fileId, targetFolderId);
+  const result = await trimbleService.moveFile(document.fileId, targetFolderId, context.sourceFolderId);
 
+  const folderLabel = isRejectedAction ? 'rejeté' : 'validé';
   addSystemNotification(
-    'success',
+    isRejectedAction ? 'warning' : 'success',
     'Document déplacé',
-    `"${document.fileName}" a été déplacé vers le dossier de validation.`
+    `"${document.fileName}" a été déplacé vers le dossier ${folderLabel}.`
   );
 
   return {
     actionId: action.id,
     success: true,
-    message: `Fichier "${document.fileName}" déplacé vers le dossier cible`,
+    message: `Fichier "${document.fileName}" déplacé vers le dossier ${folderLabel}`,
     data: result,
   };
 }

@@ -17,6 +17,7 @@ import { DocumentLabels } from '@/components/documents/DocumentLabelBadge';
 import { DeadlineIndicator } from '@/components/workflow/DeadlineIndicator';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useWorkflowStore } from '@/stores/workflowStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useWorkflowEngine } from '@/hooks/useWorkflowEngine';
 import { collectVisaData, exportVisasCSV, exportVisasPDF } from '@/lib/exportVisas';
 import { openInViewer, openForAnnotation, canOpenInViewer, getViewerType } from '@/lib/viewerIntegration';
@@ -43,9 +44,18 @@ export function VisaPanel() {
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [submittedDocs, setSubmittedDocs] = useState<Set<string>>(new Set());
 
-  // Documents pending review by the current user
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const currentUserEmail = currentUser?.email || '';
+  const currentUserId = currentUser?.id || '';
+
+  // Documents pending review BY THE CURRENT USER
   const pendingReviews = documents.filter(
-    (doc) => doc.reviewers.some((r) => !r.decision) && !submittedDocs.has(doc.id)
+    (doc) =>
+      doc.reviewers.some(
+        (r) =>
+          !r.decision &&
+          (r.userId === currentUserId || r.userEmail === currentUserEmail)
+      ) && !submittedDocs.has(doc.id)
   );
 
   const handleSubmitVisa = async (docId: string) => {
