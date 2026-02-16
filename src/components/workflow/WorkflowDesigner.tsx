@@ -195,6 +195,19 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  // Sync node data (reviewers, labels, etc.) from the store → React Flow whenever designerNodes change
+  useEffect(() => {
+    setNodes((currentNodes) =>
+      currentNodes.map((n) => {
+        const storeNode = designerNodes.find((sn) => sn.id === n.id);
+        if (storeNode && JSON.stringify(storeNode.data) !== JSON.stringify(n.data)) {
+          return { ...n, data: storeNode.data as Record<string, unknown> };
+        }
+        return n;
+      })
+    );
+  }, [designerNodes, setNodes]);
+
   // Undo/Redo system
   const undoRedo = useUndoRedo<DesignerSnapshot>({ nodes: initialNodes, edges: initialEdges });
   const isUndoRedoAction = useRef(false);
@@ -342,13 +355,18 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
   );
 
   const handleSave = useCallback(async () => {
-    // Sync React Flow state back to store
-    const workflowNodes = nodes.map((n) => ({
-      id: n.id,
-      type: n.type as WorkflowNodeType,
-      position: n.position,
-      data: n.data as unknown as WorkflowNodeData,
-    }));
+    // Merge React Flow positions with store's node data (which has up-to-date reviewers, etc.)
+    const storeNodes = useWorkflowStore.getState().designerNodes;
+    const workflowNodes = nodes.map((n) => {
+      // Get the latest data from the store (updated by NodeConfigPanel)
+      const storeNode = storeNodes.find((sn) => sn.id === n.id);
+      return {
+        id: n.id,
+        type: n.type as WorkflowNodeType,
+        position: n.position, // Position from React Flow (drag-and-drop)
+        data: (storeNode?.data || n.data) as unknown as WorkflowNodeData, // Data from store (reviewers, config)
+      };
+    });
     const workflowEdges = edges.map((e) => ({
       id: e.id,
       source: e.source,

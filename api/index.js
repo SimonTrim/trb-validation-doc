@@ -967,6 +967,113 @@ app.post('/api/auth/refresh', async (req, res) => {
   }
 });
 
+// ─── EMAIL NOTIFICATIONS ────────────────────────────────────────────────────
+
+app.post('/api/notifications/email', async (req, res) => {
+  try {
+    const { to, subject, html, documentName, workflowName, reviewerName, projectName } = req.body;
+
+    if (!to || !subject) {
+      return res.status(400).json({ error: 'Missing required fields: to, subject' });
+    }
+
+    const RESEND_API_KEY = process.env.RESEND_API_KEY;
+    const EMAIL_FROM = process.env.EMAIL_FROM || 'Validation Doc <onboarding@resend.dev>';
+
+    if (!RESEND_API_KEY) {
+      console.warn('[Notifications] RESEND_API_KEY not configured — email not sent');
+      return res.json({ sent: false, reason: 'Email service not configured (RESEND_API_KEY missing)' });
+    }
+
+    const emailHtml = html || buildReviewNotificationHtml({
+      reviewerName: reviewerName || 'Réviseur',
+      documentName: documentName || 'Document',
+      workflowName: workflowName || 'Workflow',
+      projectName: projectName || '',
+    });
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: EMAIL_FROM,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html: emailHtml,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Notifications] Resend API error:', response.status, errorText);
+      return res.status(response.status).json({ sent: false, error: errorText });
+    }
+
+    const result = await response.json();
+    console.log('[Notifications] Email sent successfully:', result.id, '→', to);
+    res.json({ sent: true, id: result.id });
+  } catch (error) {
+    console.error('[Notifications] Email error:', error);
+    res.status(500).json({ sent: false, error: error.message });
+  }
+});
+
+/** Build a styled HTML email for review notification */
+function buildReviewNotificationHtml({ reviewerName, documentName, workflowName, projectName }) {
+  return `
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f4f4f7;">
+  <div style="max-width:600px;margin:30px auto;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#005F9E,#0078D4);padding:24px 32px;">
+      <h1 style="color:#ffffff;margin:0;font-size:20px;">📋 Validation Documentaire</h1>
+      ${projectName ? `<p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:14px;">Projet : ${projectName}</p>` : ''}
+    </div>
+
+    <!-- Body -->
+    <div style="padding:28px 32px;">
+      <p style="font-size:16px;color:#333;margin:0 0 16px;">Bonjour <strong>${reviewerName}</strong>,</p>
+
+      <p style="font-size:15px;color:#555;line-height:1.6;margin:0 0 20px;">
+        Un document nécessite votre vérification dans le cadre du workflow
+        <strong style="color:#005F9E;">${workflowName}</strong>.
+      </p>
+
+      <!-- Document card -->
+      <div style="background:#f8f9fa;border-left:4px solid #0078D4;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
+        <p style="margin:0 0 4px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Document à vérifier</p>
+        <p style="margin:0;font-size:16px;font-weight:600;color:#333;">📄 ${documentName}</p>
+      </div>
+
+      <p style="font-size:14px;color:#555;line-height:1.6;margin:0 0 24px;">
+        Veuillez ouvrir l'extension <strong>Validation Documentaire</strong> dans Trimble Connect
+        pour consulter le document et soumettre votre visa.
+      </p>
+
+      <div style="text-align:center;margin:0 0 16px;">
+        <a href="https://web.connect.trimble.com" style="display:inline-block;background:#0078D4;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:6px;font-size:15px;font-weight:500;">
+          Ouvrir Trimble Connect
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="background:#f8f9fa;padding:16px 32px;border-top:1px solid #e9ecef;">
+      <p style="margin:0;font-size:12px;color:#999;text-align:center;">
+        Cet email a été envoyé automatiquement par l'extension Validation Documentaire.
+        Veuillez ne pas y répondre directement.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 // ─── HEALTH CHECK ───────────────────────────────────────────────────────────
 
 app.get('/api/health', (req, res) => {

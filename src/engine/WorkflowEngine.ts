@@ -6,10 +6,12 @@
 
 import { evaluateDecision } from './DecisionEvaluator';
 import { executeAction, getActionContext, type ActionResult } from './ActionExecutor';
+import { notifyReviewers } from '@/api/notificationService';
 import * as workflowApi from '@/api/workflowApiService';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useDocumentStore } from '@/stores/documentStore';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { generateId } from '@/lib/utils';
 import type {
   WorkflowDefinition,
@@ -406,6 +408,8 @@ class WorkflowEngineClass {
       case 'review':
         // Le workflow s'arrête ici en attendant les visas
         // Les visas arrivent via submitReview()
+        // → Notifier les réviseurs assignés par email
+        await this.notifyNodeReviewers(instance, definition, node);
         break;
 
       case 'decision':
@@ -551,6 +555,59 @@ class WorkflowEngineClass {
         endNode: nodeData.label,
       },
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────────
+
+  /**
+   * Notifie par email les réviseurs assignés à un noeud review.
+   */
+  private async notifyNodeReviewers(
+    instance: WorkflowInstance,
+    definition: WorkflowDefinition,
+    node: WorkflowNode
+  ): Promise<void> {
+    const nodeData = node.data as WorkflowNodeData;
+    const reviewerDetails = (nodeData.reviewerDetails as unknown as Array<{
+      id: string;
+      name: string;
+      email: string;
+      role?: string;
+    }>) || [];
+
+    if (reviewerDetails.length === 0) {
+      console.log(`[WorkflowEngine] No reviewers assigned to node "${nodeData.label}" — skipping email notification`);
+      return;
+    }
+
+    const projectName = useAuthStore.getState().project?.name || '';
+
+    // Send email notifications (non-blocking)
+    notifyReviewers({
+      reviewers: reviewerDetails.map((r) => ({
+        id: r.id,
+        name: r.name || r.email,
+        email: r.email,
+      })),
+      documentName: instance.documentName,
+      workflowName: definition.name,
+      projectName,
+      nodeName: (nodeData.label as string) || node.type,
+    }).catch((err) => {
+      console.warn('[WorkflowEngine] Email notification failed (non-blocking):', err);
+    });
+
+    // Also add an in-app notification
+    useAppStore.getState().addNotification({
+      id: generateId(),
+      type: 'info',
+      title: 'Vérification requise',
+      message: `"${instance.documentName}" attend la vérification de ${reviewerDetails.length} réviseur(s) sur "${nodeData.label || 'Vérification'}"`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      documentId: instance.documentId,
+      workflowInstanceId: instance.id,
     });
   }
 
