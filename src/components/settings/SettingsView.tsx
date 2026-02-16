@@ -810,8 +810,8 @@ function DemoModeToggle() {
             <p className="text-sm font-medium">Mode démo</p>
             <p className="text-xs text-muted-foreground">
               {demoMode
-                ? 'Données fictives pour la démonstration'
-                : 'Données réelles depuis Trimble Connect et le serveur'}
+                ? 'Activé — données fictives pour la démonstration'
+                : 'Désactivé — données fictives non chargées'}
             </p>
           </div>
           <Switch checked={demoMode} onCheckedChange={handleToggle} />

@@ -86,15 +86,24 @@ export async function loadProductionData(): Promise<{
   instances: WorkflowInstance[];
   users: ConnectUser[];
 }> {
-  // Wait briefly for project info if not yet available (TC timing)
+  // Wait for project info and access token (TC Workspace API timing)
   let project = useAuthStore.getState().project;
-  if (!project) {
-    console.log('[DataLoader] Waiting for project context...');
-    await new Promise((r) => setTimeout(r, 1500));
+  let token = useAuthStore.getState().accessToken;
+
+  // Retry up to 5 times (total ~5s) waiting for project + token
+  for (let attempt = 0; attempt < 5 && (!project || !token); attempt++) {
+    console.log(`[DataLoader] Waiting for project/token... (attempt ${attempt + 1}/5, project=${!!project}, token=${!!token})`);
+    await new Promise((r) => setTimeout(r, 1000));
     project = useAuthStore.getState().project;
+    token = useAuthStore.getState().accessToken;
   }
+
   if (!project) {
-    console.warn('[DataLoader] No project context after wait — returning empty data');
+    console.warn('[DataLoader] No project context after retries — returning empty data');
+    return { documents: [], definitions: [], instances: [], users: [] };
+  }
+  if (!token) {
+    console.warn('[DataLoader] No access token after retries — returning empty data');
     return { documents: [], definitions: [], instances: [], users: [] };
   }
 
@@ -113,6 +122,8 @@ export async function loadProductionData(): Promise<{
   const resolvedUsers = users.status === 'fulfilled' ? users.value : [];
   const resolvedDefs = definitions.status === 'fulfilled' ? definitions.value : [];
   const resolvedInstances = instances.status === 'fulfilled' ? instances.value : [];
+
+  console.log(`[DataLoader] API results — docs: ${resolvedDocs.length}, users: ${resolvedUsers.length}, defs: ${resolvedDefs.length}, instances: ${resolvedInstances.length}`);
 
   // Log errors without blocking
   if (docs.status === 'rejected') {

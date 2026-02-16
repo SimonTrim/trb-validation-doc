@@ -37,29 +37,25 @@ import type { CommentAttachment, CommentReaction, DocumentComment, DocumentVersi
 export function DocumentDetail() {
   const { selectedDocument, isDetailOpen, setSelectedDocument, updateDocument } = useDocumentStore();
 
-  if (!selectedDocument) return null;
-
-  const doc = selectedDocument;
-
-  // ── Chargement des versions depuis Trimble Connect ─────────────────
+  // All hooks MUST be called before any early return (React Rules of Hooks)
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionsFetched, setVersionsFetched] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!doc.fileId || !isDetailOpen) return;
-    if (versionsFetched === doc.fileId) return;
+    if (!selectedDocument?.fileId || !isDetailOpen) return;
+    if (versionsFetched === selectedDocument.fileId) return;
 
     const { isConnected } = useAuthStore.getState();
     if (!isConnected) return;
 
     setVersionsLoading(true);
-    getFileVersions(doc.fileId)
+    getFileVersions(selectedDocument.fileId)
       .then((versions) => {
         if (versions && versions.length > 0) {
           const mapped: DocumentVersion[] = versions.map((v, idx) => ({
             versionNumber: (v as any).versionNumber || idx + 1,
             versionId: v.id || '',
-            fileName: v.name || doc.fileName,
+            fileName: v.name || selectedDocument.fileName,
             fileSize: v.size || 0,
             uploadedBy: (v as any).createdBy || (v as any).modifiedBy || '',
             uploadedByName: typeof (v as any).createdBy === 'object'
@@ -68,32 +64,31 @@ export function DocumentDetail() {
             uploadedAt: (v as any).createdOn || (v as any).modifiedOn || '',
             comment: (v as any).description || '',
           }));
-          updateDocument(doc.id, { versionHistory: mapped, versionNumber: mapped.length });
+          updateDocument(selectedDocument.id, { versionHistory: mapped, versionNumber: mapped.length });
         }
-        setVersionsFetched(doc.fileId);
+        setVersionsFetched(selectedDocument.fileId);
       })
       .catch((err) => {
         console.warn('[DocumentDetail] Failed to load file versions:', err);
-        setVersionsFetched(doc.fileId);
+        if (selectedDocument) setVersionsFetched(selectedDocument.fileId);
       })
       .finally(() => setVersionsLoading(false));
-  }, [doc.fileId, doc.id, isDetailOpen, versionsFetched, updateDocument, doc.fileName]);
+  }, [selectedDocument?.fileId, selectedDocument?.id, selectedDocument?.fileName, isDetailOpen, versionsFetched, updateDocument]);
 
   const handleClose = () => {
     setSelectedDocument(null);
     setVersionsFetched(null);
   };
 
-  // ── Téléchargement ──────────────────────────────────────────────────
-
   const handleDownload = useCallback(async () => {
-    if (!doc.fileId) return;
+    const sd = useDocumentStore.getState().selectedDocument;
+    if (!sd?.fileId) return;
     try {
-      const { url } = await getFileDownloadUrl(doc.fileId);
+      const { url } = await getFileDownloadUrl(sd.fileId);
       if (url) {
         const a = document.createElement('a');
         a.href = url;
-        a.download = doc.fileName;
+        a.download = sd.fileName;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         document.body.appendChild(a);
@@ -103,7 +98,13 @@ export function DocumentDetail() {
     } catch (err) {
       console.error('[DocumentDetail] Download failed:', err);
     }
-  }, [doc.fileId, doc.fileName]);
+  }, []);
+
+  // Early return AFTER all hooks (React Rules of Hooks)
+  if (!selectedDocument) return null;
+
+  // After the null guard, selectedDocument is guaranteed non-null
+  const doc = selectedDocument;
 
   // ── Commentaires ────────────────────────────────────────────────────
 
