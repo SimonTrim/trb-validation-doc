@@ -78,7 +78,21 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
 }
 
 /** Mode applicatif : auto-détecte 'production' quand dans TC ou forcé par env */
-const APP_MODE = (import.meta.env.VITE_APP_MODE as string) || 'auto';
+const APP_MODE_ENV = (import.meta.env.VITE_APP_MODE as string) || 'auto';
+
+/** Lecture du mode démo depuis localStorage (toggle dans les paramètres) */
+function getDemoModeFromStorage(): boolean {
+  try {
+    return localStorage.getItem('validation-demo-mode') === 'true';
+  } catch { return false; }
+}
+
+/** Sauvegarde du mode démo dans localStorage */
+export function setDemoModeStorage(enabled: boolean) {
+  try {
+    localStorage.setItem('validation-demo-mode', String(enabled));
+  } catch { /* ignore */ }
+}
 
 // ============================================================================
 // DEMO DATA — Pour le développement et la démonstration
@@ -424,11 +438,20 @@ export function App() {
   useEffect(() => {
     async function init() {
       const inTC = isInTrimbleConnect();
-      // Auto-detect: production when in TC iframe OR when explicitly set
-      // 'auto' mode → production in TC, demo outside
-      const mode = APP_MODE === 'production' || (APP_MODE === 'auto' && inTC) ? 'production' : 'demo';
+      const demoToggle = getDemoModeFromStorage();
 
-      console.log(`[App] Initializing in ${mode} mode (inTC=${inTC}, APP_MODE=${APP_MODE})`);
+      // Mode detection:
+      // 1. If in TC and demo toggle is OFF → always production (ignore env var)
+      // 2. If in TC and demo toggle is ON → demo mode (for testing)
+      // 3. If NOT in TC → use env var or auto-detect
+      let mode: 'production' | 'demo';
+      if (inTC) {
+        mode = demoToggle ? 'demo' : 'production';
+      } else {
+        mode = APP_MODE_ENV === 'production' ? 'production' : 'demo';
+      }
+
+      console.log(`[App] Initializing in ${mode} mode (inTC=${inTC}, APP_MODE_ENV=${APP_MODE_ENV}, demoToggle=${demoToggle})`);
 
       // Step 0: Handle OAuth callback if returning from Trimble Identity
       if (!inTC && isOAuthCallback()) {
@@ -510,7 +533,7 @@ export function App() {
 
   // Error state — with standalone login option
   if (error && !initialized) {
-    const showLogin = !isInTrimbleConnect() && APP_MODE === 'production';
+    const showLogin = !isInTrimbleConnect() && APP_MODE_ENV === 'production';
     return (
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',

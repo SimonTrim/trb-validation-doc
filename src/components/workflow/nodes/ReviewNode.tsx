@@ -5,9 +5,10 @@ import type { WorkflowNodeData } from '@/models/workflow';
 
 export function ReviewNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as WorkflowNodeData;
-  // Use reviewerDetails as the source of truth; fall back to assignees count
+  // reviewerDetails is the single source of truth for reviewer count
+  // Do NOT fall back to assignees — those may contain stale demo IDs
   const reviewerDetails = (nodeData.reviewerDetails as unknown as Array<unknown>) || [];
-  const assigneeCount = reviewerDetails.length > 0 ? reviewerDetails.length : (nodeData.assignees?.length || 0);
+  const assigneeCount = reviewerDetails.length;
   const requiredApprovals = nodeData.requiredApprovals || 1;
 
   return (

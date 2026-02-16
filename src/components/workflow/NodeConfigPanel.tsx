@@ -254,12 +254,10 @@ function ReviewerConfigSection({
       .finally(() => setLoadingUsers(false));
   }, []);
 
-  // Parse current assignees into structured data
-  // reviewerDetails is the source of truth; rebuild assignees from it
+  // reviewerDetails is the single source of truth for assigned reviewers
+  // Do NOT fall back to nodeData.assignees — those may contain stale demo IDs
   const reviewerDetails: NodeReviewer[] = (nodeData.reviewerDetails as unknown as NodeReviewer[]) || [];
-  const assignees: string[] = reviewerDetails.length > 0
-    ? reviewerDetails.map((r) => r.id)
-    : (nodeData.assignees as string[]) || [];
+  const assignees: string[] = reviewerDetails.map((r) => r.id);
 
   const addReviewer = (user: NodeReviewer) => {
     if (reviewerDetails.some((r) => r.id === user.id)) return;

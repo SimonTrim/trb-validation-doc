@@ -358,13 +358,20 @@ export function WorkflowDesigner({ onSave }: WorkflowDesignerProps) {
     // Merge React Flow positions with store's node data (which has up-to-date reviewers, etc.)
     const storeNodes = useWorkflowStore.getState().designerNodes;
     const workflowNodes = nodes.map((n) => {
-      // Get the latest data from the store (updated by NodeConfigPanel)
       const storeNode = storeNodes.find((sn) => sn.id === n.id);
+      const rawData = (storeNode?.data || n.data) as unknown as WorkflowNodeData;
+
+      // Clean up: sync assignees from reviewerDetails to remove stale demo IDs
+      if (n.type === 'review' && rawData) {
+        const details = (rawData.reviewerDetails as unknown as Array<{ id: string }>) || [];
+        rawData.assignees = details.map((r) => r.id);
+      }
+
       return {
         id: n.id,
         type: n.type as WorkflowNodeType,
-        position: n.position, // Position from React Flow (drag-and-drop)
-        data: (storeNode?.data || n.data) as unknown as WorkflowNodeData, // Data from store (reviewers, config)
+        position: n.position,
+        data: rawData,
       };
     });
     const workflowEdges = edges.map((e) => ({

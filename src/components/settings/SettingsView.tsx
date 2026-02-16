@@ -28,6 +28,7 @@ import { getUserPreferences, setUserPreferences } from '@/api/documentApiService
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { WorkflowSettingsPanel } from '@/components/workflow/WorkflowSettingsPanel';
 import { FolderWatcher } from '@/engine';
+import { setDemoModeStorage } from '@/App';
 
 export function SettingsView() {
   const { isConnected, project, currentUser, accessToken } = useAuthStore();
@@ -379,6 +380,9 @@ export function SettingsView() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Demo mode toggle */}
+          <DemoModeToggle />
 
           <Card>
             <CardHeader>
@@ -769,6 +773,60 @@ function EmailNotificationSettings() {
           </div>
         </CardContent>
       )}
+    </Card>
+  );
+}
+
+function DemoModeToggle() {
+  const [demoMode, setDemoMode] = useState(() => {
+    try { return localStorage.getItem('validation-demo-mode') === 'true'; } catch { return false; }
+  });
+
+  const handleToggle = (enabled: boolean) => {
+    setDemoMode(enabled);
+    setDemoModeStorage(enabled);
+    toast.info(
+      enabled
+        ? 'Mode démo activé. Rechargez la page pour voir les données de démonstration.'
+        : 'Mode production activé. Rechargez la page pour voir les données réelles.',
+      { duration: 5000 }
+    );
+  };
+
+  return (
+    <Card className={demoMode ? 'border-amber-300 bg-amber-50/50 dark:bg-amber-950/20' : ''}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Eye className="h-4 w-4" />
+          Mode de fonctionnement
+        </CardTitle>
+        <CardDescription>
+          Basculez entre le mode production (données réelles Trimble Connect) et le mode démo (données fictives).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Mode démo</p>
+            <p className="text-xs text-muted-foreground">
+              {demoMode
+                ? 'Données fictives pour la démonstration'
+                : 'Données réelles depuis Trimble Connect et le serveur'}
+            </p>
+          </div>
+          <Switch checked={demoMode} onCheckedChange={handleToggle} />
+        </div>
+        {demoMode && (
+          <div className="rounded-lg bg-amber-100 dark:bg-amber-900/30 p-3 text-xs text-amber-800 dark:text-amber-300">
+            <Info className="h-3.5 w-3.5 inline mr-1" />
+            Le mode démo affiche des documents et workflows fictifs. Les modifications ne sont pas sauvegardées.
+            <strong className="block mt-1">Rechargez la page (F5) pour appliquer le changement.</strong>
+          </div>
+        )}
+        <Badge variant={demoMode ? 'secondary' : 'default'} className="text-xs">
+          {demoMode ? 'Démo' : 'Production'}
+        </Badge>
+      </CardContent>
     </Card>
   );
 }
